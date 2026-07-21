@@ -176,3 +176,112 @@ export interface APIErrorDocument {
     message?: string;
   };
 }
+
+export type CloudAvailability = 'not_configured' | 'available' | 'unavailable' | 'contract_error';
+export type CloudUserStatus = 'active' | 'pending_deletion' | 'disabled';
+export type CloudDeviceStatus = 'active' | 'inactive' | 'revoked';
+export type CloudSessionStatus = 'active' | 'rotated' | 'expired' | 'revoked' | 'replay_detected';
+export type OperationState = 'queued' | 'executing' | 'reconciling' | 'succeeded' | 'failed' | 'conflict';
+export type ApprovalStatus = 'pending_review' | 'approved' | 'rejected' | 'expired' | 'cancelled';
+export type ApprovalExecutionStatus = 'not_started' | OperationState;
+
+export interface CloudUser {
+  user_id: string;
+  masked_email?: string;
+  masked_phone?: string;
+  status: CloudUserStatus;
+  administratively_disabled: boolean;
+  deletion_finalized_at?: string;
+  administrative_revision: number;
+  device_count: number;
+  active_device_count: number;
+  active_session_count: number;
+  created_at: string;
+  last_cloud_activity_at?: string;
+}
+
+export interface CloudDevice {
+  device_id: string;
+  user_id: string;
+  display_name: string;
+  platform: string;
+  client_version: string;
+  status: CloudDeviceStatus;
+  last_seen_at?: string;
+}
+
+export interface CloudSession {
+  session_id: string;
+  user_id: string;
+  device_id: string;
+  status: CloudSessionStatus;
+  issued_at: string;
+  expires_at: string;
+  revoked_at?: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  next_cursor?: string;
+}
+
+export interface AdminOperation {
+  operation_id: string;
+  state: OperationState;
+  error_code?: string;
+  updated_at: string;
+}
+
+export interface ApprovalEvent {
+  id: string;
+  event_type: string;
+  before_status: string;
+  after_status: string;
+  result_code?: string;
+  actor_admin_id: string;
+  actor_role: AdminRole;
+  request_id: string;
+  created_at: string;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  action: 'disable_user' | 'enable_user';
+  target_user_id: string;
+  target_snapshot: CloudUser;
+  requested_by_admin_id: string;
+  requested_by_role: 'operator';
+  reviewed_by_admin_id?: string;
+  reason_code: string;
+  ticket_reference?: string;
+  note?: string;
+  expected_revision: number;
+  approval_status: ApprovalStatus;
+  execution_status: ApprovalExecutionStatus;
+  operation_id?: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+  version: number;
+  events?: ApprovalEvent[];
+}
+
+export interface SystemHealth {
+  admin: 'ok';
+  postgres: 'ok' | 'unavailable';
+  redis: 'ok' | 'unavailable';
+  cloud: {
+    configured: boolean;
+    availability: CloudAvailability;
+    mtls: 'not_checked' | 'ok' | 'unavailable' | 'contract_error';
+    service_jwt: 'not_checked' | 'ok' | 'unavailable' | 'contract_error';
+    upstream: 'not_checked' | 'ok' | 'unavailable' | 'contract_error';
+    checked_at: string;
+  };
+}
+
+export interface ReasonInput {
+  reason_code: string;
+  ticket_reference: string;
+  note: string;
+}

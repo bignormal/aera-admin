@@ -1,6 +1,7 @@
 import type { APIErrorDocument } from './contracts';
 
 const apiRoot = '/api/v1';
+const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
 let csrfToken: string | null = null;
 let unauthorizedHandler: (() => void) | null = null;
 
@@ -92,6 +93,23 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 export function postJSON<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+export async function postIdempotentJSON<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey: string,
+): Promise<T> {
+  if (!idempotencyKeyPattern.test(idempotencyKey)) throw new Error('Invalid idempotency key');
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  });
 }
 
 export function putJSON<T>(path: string, body: unknown): Promise<T> {
