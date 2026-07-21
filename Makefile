@@ -14,7 +14,7 @@ test:
 	go test ./... -count=1
 
 test-integration: dependencies-up
-	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' go test ./internal/store -run 'TestMigrate|TestAdminAudit' -count=1 -v
+	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' go test ./internal/store ./internal/audit -count=1 -v
 
 web-test:
 	cd web && pnpm test --run && pnpm typecheck && pnpm build
