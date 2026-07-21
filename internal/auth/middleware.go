@@ -1,0 +1,39 @@
+package auth
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/bignormal/aera-admin/internal/rbac"
+)
+
+func Require(permission rbac.Permission, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		principal, ok := PrincipalFromContext(request.Context())
+		if !ok || principal.AdminID == "" || !principal.Role.Valid() {
+			writeAuthorizationError(response, http.StatusUnauthorized, "AUTH_REQUIRED", "需要有效的管理员会话")
+			return
+		}
+		if !rbac.Allowed(principal.Role, permission) {
+			writeAuthorizationError(response, http.StatusForbidden, "PERMISSION_DENIED", "没有执行此操作的权限")
+			return
+		}
+		next.ServeHTTP(response, request)
+	})
+}
+
+func writeAuthorizationError(response http.ResponseWriter, status int, code, message string) {
+	response.Header().Set("Cache-Control", "no-store")
+	response.Header().Set("Content-Type", "application/json")
+	response.Header().Set("X-Content-Type-Options", "nosniff")
+	response.WriteHeader(status)
+	_ = json.NewEncoder(response).Encode(struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}{Error: struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}{Code: code, Message: message}})
+}
