@@ -213,6 +213,12 @@ func containsSensitiveText(value string) bool {
 		strings.Contains(strings.ToLower(value), "__host-aera_admin_session")
 }
 
+// ContainsSensitiveText reports whether free text contains identity or credential material
+// that must not be copied into administrator-facing labels, logs, or audit fields.
+func ContainsSensitiveText(value string) bool {
+	return containsSensitiveText(value)
+}
+
 func canonicalBytes(event auditEvent) []byte {
 	var encoded bytes.Buffer
 	writeCanonicalBytes(&encoded, []byte("aera-admin.audit.v1"))

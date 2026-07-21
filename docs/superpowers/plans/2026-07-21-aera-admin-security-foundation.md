@@ -780,9 +780,14 @@ git commit -m "feat: add tamper-evident administrator audit"
 - Create: `internal/admin/http.go`
 - Create: `internal/admin/http_test.go`
 - Create: `cmd/aera-admin-bootstrap/main.go`
+- Create: `cmd/aera-admin-bootstrap/main_test.go`
+- Create: `internal/secure/secret.go`
+- Create: `internal/secure/secret_test.go`
+- Create: `internal/store/migrations/000002_invitation_totp.sql`
+- Modify: `cmd/aera-admin/main.go`
 
 **Interfaces:**
-- Produces: `admin.Service.Invite`, `admin.Service.Activate`, `admin.Service.List`, `admin.Service.ChangeRole`, `admin.Service.Suspend`, and `admin.Service.ResetTOTP`.
+- Produces: `admin.Service.BootstrapInvite`, `admin.Service.Invite`, `admin.Service.PrepareActivation`, `admin.Service.Activate`, `admin.Service.List`, `admin.Service.ChangeRole`, `admin.Service.Suspend`, and `admin.Service.ResetTOTP`.
 - Consumes: secure identity/password/TOTP/token primitives and `audit.Recorder`.
 
 - [ ] **Step 1: Write lifecycle invariant tests**
@@ -804,7 +809,9 @@ func TestActivationConsumesInvitationAndRequiresTOTP(t *testing.T) {
 
 - [ ] **Step 2: Implement transactional invitation and activation**
 
-`Invite` seals the administrator email, stores lookup HMAC and a 24-hour invitation-token digest, and emits audit without raw email. `Activate` locks the invitation and user, validates password and TOTP, stores credentials and eight recovery-code digests, changes status to active, consumes the invitation, and audits in one PostgreSQL transaction.
+`Invite` seals the administrator email, stores lookup HMAC and a 24-hour invitation-token digest, encrypts the pending TOTP secret through the versioned TOTP key ring, and emits audit without raw email. Duplicate detection checks every retained lookup key so rotation cannot create a second account. An expired invitation is reissued against the same `invited` administrator row while the previous invitation is atomically consumed. Migration `000002` explicitly invalidates pre-feature invitations that have no pending TOTP material; every live invitation must have a complete encrypted secret, and consumption clears that redundant secret copy.
+
+The one-time URL carries the raw token only in `/activate#token=...`; the fragment is never sent in the initial HTTP request. The activation client extracts and clears it, then calls `POST /auth/activation/prepare` with JSON to obtain the masked identity and provisioning URI. `Activate` locks the invitation and user, revalidates TOTP and the password-credential snapshot, stores credentials and eight recovery-code digests, changes status to active, consumes the invitation, and audits in one PostgreSQL transaction. TOTP reset keeps the independent password, revokes existing sessions, and requires password-protected rebinding.
 
 - [ ] **Step 3: Implement bootstrap CLI guardrails**
 
@@ -817,6 +824,7 @@ The command is allowed only while fewer than two active super admins exist, prin
 - [ ] **Step 4: Implement JSON HTTP adapter**
 
 ```text
+POST /api/v1/auth/activation/prepare
 POST /api/v1/admin-users/invitations
 POST /api/v1/auth/activate
 GET  /api/v1/admin-users
@@ -825,7 +833,7 @@ POST /api/v1/admin-users/{id}/suspend
 POST /api/v1/admin-users/{id}/totp/reset
 ```
 
-All management endpoints require `ManageAdministrators`; activation is token-authenticated and rate limited. Responses never include the raw administrator email; invitation creation returns the one-time activation URL only to the initiating super admin.
+All management endpoints require `ManageAdministrators`; activation is token-authenticated. The rate limiter is shared with login and is attached in Task 8 before the service is production-ready. Responses never include the raw administrator email; invitation creation returns the one-time activation URL only to the initiating super admin. Request decoding is strict, bounded, and `no-store`; raw credentials and tokens are never copied into errors or audit records.
 
 - [ ] **Step 5: Verify lifecycle and CLI**
 
@@ -836,7 +844,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/admin cmd/aera-admin-bootstrap
+git add internal/admin internal/secure/secret.go internal/secure/secret_test.go internal/store/migrations/000002_invitation_totp.sql cmd/aera-admin cmd/aera-admin-bootstrap Makefile
 git commit -m "feat: add administrator invitation lifecycle"
 ```
 

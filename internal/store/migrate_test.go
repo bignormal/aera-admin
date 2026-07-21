@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,14 +46,16 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	assertCheckConstraint(t, ctx, postgres, "admin_users", "admin_users_status_check")
 	assertUniqueColumns(t, ctx, postgres, "admin_identities", "admin_identities_lookup_key", []string{"lookup_key_id", "lookup_hmac"})
 	assertColumnType(t, ctx, postgres, "admin_audit_events", "previous_hash", "bytea")
+	assertCheckConstraintContains(t, ctx, postgres, "admin_invitations", "admin_invitations_totp_secret_check", "num_nonnulls")
+	assertCheckConstraintContains(t, ctx, postgres, "admin_invitations", "admin_invitations_totp_secret_check", "consumed_at")
 
 	var migrationCount int
 	var checksumLength int
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 1 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 1/32", migrationCount, checksumLength)
+	if migrationCount != 2 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 2/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int
@@ -62,6 +65,7 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	if reasonCodeCount < 8 {
 		t.Fatalf("active seeded reason codes = %d, want at least 8", reasonCodeCount)
 	}
+	assertColumnType(t, ctx, postgres, "admin_invitations", "totp_ciphertext", "bytea")
 
 	if _, err := postgres.Exec(ctx, `UPDATE schema_migrations SET checksum = $1`, bytes.Repeat([]byte{9}, 32)); err != nil {
 		t.Fatalf("modify migration checksum for drift test: %v", err)
@@ -186,6 +190,23 @@ func assertCheckConstraint(t *testing.T, ctx context.Context, postgres *pgxpool.
 	}
 	if !exists {
 		t.Errorf("check constraint %s.%s does not exist", table, constraint)
+	}
+}
+
+func assertCheckConstraintContains(t *testing.T, ctx context.Context, postgres *pgxpool.Pool, table, constraint, fragment string) {
+	t.Helper()
+	var definition string
+	if err := postgres.QueryRow(ctx, `
+		SELECT pg_get_constraintdef(c.oid)
+		FROM pg_constraint c
+		JOIN pg_class r ON r.oid = c.conrelid
+		JOIN pg_namespace n ON n.oid = r.relnamespace
+		WHERE n.nspname = current_schema() AND r.relname = $1 AND c.conname = $2
+	`, table, constraint).Scan(&definition); err != nil {
+		t.Fatalf("read check constraint %s.%s: %v", table, constraint, err)
+	}
+	if !strings.Contains(definition, fragment) {
+		t.Errorf("check constraint %s.%s = %q, want fragment %q", table, constraint, definition, fragment)
 	}
 }
 

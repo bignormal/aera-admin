@@ -11,10 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bignormal/aera-admin/internal/admin"
+	adminaudit "github.com/bignormal/aera-admin/internal/audit"
 	"github.com/bignormal/aera-admin/internal/config"
 	"github.com/bignormal/aera-admin/internal/httpapi"
+	"github.com/bignormal/aera-admin/internal/secure"
 	"github.com/bignormal/aera-admin/internal/store"
 	"github.com/bignormal/aera-admin/internal/webui"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -57,8 +61,12 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 		return err
 	}
 	defer func() { _ = redisStore.Close() }()
+	adminAPI, err := buildAdminAPI(settings, postgres)
+	if err != nil {
+		return err
+	}
 
-	handler := httpapi.New(httpapi.Dependencies{PostgreSQL: postgres, Redis: redisStore, Web: webui.EmbeddedHandler()})
+	handler := httpapi.New(httpapi.Dependencies{PostgreSQL: postgres, Redis: redisStore, API: adminAPI, Web: webui.EmbeddedHandler()})
 	server := newHTTPServer(settings.ListenAddr, handler)
 	serveResult := make(chan error, 1)
 	go func() {
@@ -79,6 +87,42 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 		}
 		return nil
 	}
+}
+
+func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool) (http.Handler, error) {
+	passwords, err := secure.DefaultPasswordHasher()
+	if err != nil {
+		return nil, err
+	}
+	identities, err := secure.NewIdentityCodec(secure.IdentityCodecConfig{
+		ActiveEncryptionKeyID: settings.IdentityEncryptionKeys.ActiveKeyID,
+		EncryptionKeys:        settings.IdentityEncryptionKeys.Keys,
+		ActiveLookupKeyID:     settings.IdentityLookupKeys.ActiveKeyID,
+		LookupKeys:            settings.IdentityLookupKeys.Keys,
+	})
+	if err != nil {
+		return nil, err
+	}
+	totpSecrets, err := secure.NewSecretCodec(secure.SecretCodecConfig{
+		ActiveKeyID: settings.TOTPEncryptionKeys.ActiveKeyID,
+		Keys:        settings.TOTPEncryptionKeys.Keys,
+	})
+	if err != nil {
+		return nil, err
+	}
+	auditService, err := adminaudit.NewService(postgres)
+	if err != nil {
+		return nil, err
+	}
+	adminService, err := admin.NewService(admin.ServiceConfig{
+		PostgreSQL: postgres, Passwords: passwords, Identities: identities,
+		TOTPSecrets: totpSecrets, TOTP: secure.DefaultTOTP(), Audit: auditService,
+		PublicURL: settings.PublicURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return admin.NewHandler(adminService), nil
 }
 
 func newHTTPServer(address string, handler http.Handler) *http.Server {
