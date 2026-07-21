@@ -25,6 +25,8 @@ export default function globalTeardown(_config: FullConfig): void {
   const fixtures = readFixtures();
   const serverLog = readFileSync(requiredEnvironment('AERA_ADMIN_E2E_SERVER_LOG'), 'utf8');
   assertNoCanaries(serverLog, fixtures.sensitiveCanaries, 'structured server log');
+  const cloudLog = readFileSync(requiredEnvironment('AERA_ADMIN_E2E_CLOUD_LOG'), 'utf8');
+  assertNoCanaries(cloudLog, fixtures.sensitiveCanaries, 'Cloud contract process log');
 
   execFileSync(
     'go',

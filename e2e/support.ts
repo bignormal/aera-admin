@@ -30,6 +30,13 @@ export interface SensitiveCanary {
 export interface E2EFixtures {
   baseURL: string;
   browserCandidate: BrowserCandidateFixture;
+  cloud: {
+    maskedEmail: string;
+    rawLookupIdentity: string;
+    sessionID: string;
+    deviceID: string;
+    userID: string;
+  };
   roles: Record<Role, AdministratorFixture[]>;
   sensitiveCanaries: SensitiveCanary[];
 }
@@ -124,6 +131,7 @@ export async function apiRequest<T>(
     body?: unknown;
     cookie?: string;
     csrfToken?: string;
+    headers?: Record<string, string>;
     method?: string;
     origin?: boolean;
   } = {},
@@ -134,6 +142,7 @@ export async function apiRequest<T>(
   if (options.cookie) headers.set('Cookie', options.cookie);
   if (options.csrfToken) headers.set('X-CSRF-Token', options.csrfToken);
   if (options.origin ?? (method !== 'GET' && method !== 'HEAD')) headers.set('Origin', baseURL);
+  for (const [name, value] of Object.entries(options.headers ?? {})) headers.set(name, value);
   const response = await fetch(`${baseURL}/api/v1${path}`, {
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: 'no-store',

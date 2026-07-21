@@ -43,6 +43,8 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   const baseURL = requiredEnvironment('AERA_ADMIN_E2E_BASE_URL');
   const bootstrapBinary = requiredEnvironment('AERA_ADMIN_E2E_BOOTSTRAP_BINARY');
   const sensitiveCanaries: SensitiveCanary[] = [];
+  const rawCloudLookupIdentity = 'cloud.lookup.canary@example.test';
+  sensitiveCanaries.push({ kind: 'cloud_raw_lookup_identity', value: rawCloudLookupIdentity });
   const roleFixtures: Record<Role, AdministratorFixture[]> = {
     super_admin: [],
     developer: [],
@@ -75,6 +77,36 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     { kind: 'csrf_token', value: steppedUp.body.csrf_token },
   );
   bootstrapActor.csrfToken = steppedUp.body.csrf_token;
+
+  const cloudReviewerEmail = 'e2e.super3.canary@example.test';
+  const cloudReviewerPassword = passwordFor('super-admin', 3);
+  const cloudReviewerInvitation = await apiRequest<{ activation_url: string }>(
+    baseURL,
+    '/admin-users/invitations',
+    {
+      body: {
+        display_name: 'Cloud 审批超级管理员',
+        email: cloudReviewerEmail,
+        note: '',
+        reason_code: 'staff_change',
+        role: 'super_admin',
+        ticket_reference: 'E2E-CLOUD-REVIEWER',
+      },
+      cookie: bootstrapActor.cookie,
+      csrfToken: bootstrapActor.csrfToken,
+    },
+  );
+  expectStatus(cloudReviewerInvitation, 201, 'invite Cloud approval super administrator');
+  roleFixtures.super_admin.push(
+    await activateInvitation(
+      baseURL,
+      cloudReviewerInvitation.body.activation_url,
+      cloudReviewerEmail,
+      cloudReviewerPassword,
+      'super_admin',
+      sensitiveCanaries,
+    ),
+  );
 
   for (const [ordinal, role] of managedRoles.entries()) {
     const email = `e2e.${role}.canary@example.test`;
@@ -130,6 +162,13 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
       maskedIdentity: maskedEmail(candidateEmail),
       password: candidatePassword,
       totpSecret: candidate.secret,
+    },
+    cloud: {
+      maskedEmail: 'c***@example.test',
+      rawLookupIdentity: rawCloudLookupIdentity,
+      sessionID: '019f0000-0000-7000-8000-000000000073',
+      deviceID: '019f0000-0000-7000-8000-000000000072',
+      userID: '019f0000-0000-7000-8000-000000000071',
     },
     roles: roleFixtures,
     sensitiveCanaries,

@@ -44,7 +44,8 @@ func TestE2EAcceptance(t *testing.T) {
 			COALESCE(actor_role, ''), event_type, object_type, outcome,
 			COALESCE(reason_code, ''), COALESCE(ticket_reference, ''), COALESCE(note, ''),
 			COALESCE(error_code, ''), COALESCE(before_state::text, ''), COALESCE(after_state::text, ''),
-			request_id, COALESCE(user_agent, '')
+			request_id, COALESCE(approval_id::text, ''), COALESCE(operation_id::text, ''),
+			COALESCE(user_agent, '')
 		), E'\n'), '')
 		FROM admin_audit_events
 	`).Scan(&count, &auditText); err != nil {
@@ -74,5 +75,36 @@ func TestE2EAcceptance(t *testing.T) {
 		if canary.Value != "" && strings.Contains(auditText, canary.Value) {
 			t.Fatalf("audit text contains sensitive canary %d (%s)", index, canary.Kind)
 		}
+	}
+
+	var requestID, approvalID, operationID string
+	if err := postgres.QueryRow(ctx, `
+		SELECT request_id, approval_id::text, operation_id::text
+		FROM admin_audit_events
+		WHERE event_type = 'account_lifecycle_approved'
+		  AND approval_id IS NOT NULL AND operation_id IS NOT NULL
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`).Scan(&requestID, &approvalID, &operationID); err != nil {
+		t.Fatal("successful lifecycle audit identifiers are missing")
+	}
+	if requestID == "" || approvalID == "" || operationID == "" {
+		t.Fatal("successful lifecycle audit identifiers are empty")
+	}
+	var requestedCount, succeededCount int
+	if err := postgres.QueryRow(ctx, `
+		SELECT count(*) FROM admin_audit_events
+		WHERE event_type = 'account_lifecycle_requested' AND approval_id = $1
+	`, approvalID).Scan(&requestedCount); err != nil {
+		t.Fatal("read lifecycle request audit linkage")
+	}
+	if err := postgres.QueryRow(ctx, `
+		SELECT count(*) FROM admin_audit_events
+		WHERE event_type = 'cloud_operation_succeeded' AND approval_id = $1 AND operation_id = $2
+	`, approvalID, operationID).Scan(&succeededCount); err != nil {
+		t.Fatal("read lifecycle execution audit linkage")
+	}
+	if requestedCount < 1 || succeededCount < 1 {
+		t.Fatalf("lifecycle audit linkage requested=%d succeeded=%d", requestedCount, succeededCount)
 	}
 }
