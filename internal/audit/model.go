@@ -48,6 +48,7 @@ var (
 		"device_status":    {},
 		"execution_status": {},
 		"mfa_status":       {},
+		"operation_status": {},
 		"reason_code":      {},
 		"role":             {},
 		"security_version": {},

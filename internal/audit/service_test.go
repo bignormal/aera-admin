@@ -251,6 +251,21 @@ func TestNewServiceRequiresPostgreSQL(t *testing.T) {
 	}
 }
 
+func TestPrepareRecordAllowsSafeOperationStateOnly(t *testing.T) {
+	record := validRecord("cloud_operation_reconciling", "req-operation-state")
+	record.BeforeState = map[string]string{"operation_status": "queued"}
+	record.AfterState = map[string]string{"operation_status": "reconciling"}
+	if _, err := prepareRecord(record); err != nil {
+		t.Fatalf("prepareRecord() error = %v", err)
+	}
+	for _, unsafeKey := range []string{"email", "phone", "token"} {
+		record.AfterState = map[string]string{unsafeKey: "masked_value"}
+		if _, err := prepareRecord(record); !errors.Is(err, ErrInvalidRecord) {
+			t.Fatalf("prepareRecord(%q state) error = %v, want ErrInvalidRecord", unsafeKey, err)
+		}
+	}
+}
+
 func validRecord(eventType, requestID string) Record {
 	objectID := uuid.New()
 	return Record{

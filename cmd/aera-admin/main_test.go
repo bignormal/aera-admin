@@ -30,7 +30,7 @@ func TestNewHTTPServerUsesBoundedTimeouts(t *testing.T) {
 	}
 }
 
-func TestBuildAdminAPIWiresPublicAuthAndProtectedAdministratorRoutes(t *testing.T) {
+func TestBuildAdminRuntimeWiresPublicAuthProtectedRoutesAndWorker(t *testing.T) {
 	postgres := testkit.Postgres(t)
 	redisClient, _ := testkit.Redis(t)
 	keyRing := config.KeyRing{ActiveKeyID: "v1", Keys: map[string][]byte{"v1": bytes.Repeat([]byte{7}, 32)}}
@@ -38,6 +38,7 @@ func TestBuildAdminAPIWiresPublicAuthAndProtectedAdministratorRoutes(t *testing.
 		Environment: "test-" + uuid.NewString(), PublicURL: "https://admin.example.test",
 		IdentityEncryptionKeys: keyRing, IdentityLookupKeys: keyRing, TOTPEncryptionKeys: keyRing,
 		SessionHMACKey: bytes.Repeat([]byte{8}, 32), CSRFHMACKey: bytes.Repeat([]byte{9}, 32),
+		OperationHMACKey: bytes.Repeat([]byte{10}, 32),
 	}
 	runtimePrefix := "aera-admin:" + settings.Environment + ":"
 	t.Cleanup(func() {
@@ -62,16 +63,19 @@ func TestBuildAdminAPIWiresPublicAuthAndProtectedAdministratorRoutes(t *testing.
 			}
 		}
 	})
-	handler, err := buildAdminAPI(settings, postgres, redisClient)
+	runtime, err := buildAdminRuntime(settings, postgres, redisClient)
 	if err != nil {
-		t.Fatalf("buildAdminAPI() error = %v", err)
+		t.Fatalf("buildAdminRuntime() error = %v", err)
+	}
+	if runtime.Worker == nil {
+		t.Fatal("buildAdminRuntime() did not compose the Outbox Worker")
 	}
 	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":"unknown@example.com","password":"correct horse battery staple"}`))
 	loginRequest.RemoteAddr = "192.0.2.20:4242"
 	loginRequest.Header.Set("Content-Type", "application/json")
 	loginRequest.Header.Set("Origin", settings.PublicURL)
 	loginResponse := httptest.NewRecorder()
-	handler.ServeHTTP(loginResponse, loginRequest)
+	runtime.API.ServeHTTP(loginResponse, loginRequest)
 	if loginResponse.Code != http.StatusUnauthorized || !strings.Contains(loginResponse.Body.String(), `"code":"AUTH_INVALID_CREDENTIALS"`) {
 		t.Fatalf("login route response = %d %q", loginResponse.Code, loginResponse.Body.String())
 	}
@@ -88,7 +92,7 @@ func TestBuildAdminAPIWiresPublicAuthAndProtectedAdministratorRoutes(t *testing.
 	protectedRequest := httptest.NewRequest(http.MethodGet, "/admin-users", nil)
 	protectedRequest.RemoteAddr = "192.0.2.20:4242"
 	protectedResponse := httptest.NewRecorder()
-	handler.ServeHTTP(protectedResponse, protectedRequest)
+	runtime.API.ServeHTTP(protectedResponse, protectedRequest)
 	if protectedResponse.Code != http.StatusUnauthorized || !strings.Contains(protectedResponse.Body.String(), `"code":"AUTH_REQUIRED"`) {
 		t.Fatalf("protected route response = %d %q", protectedResponse.Code, protectedResponse.Body.String())
 	}

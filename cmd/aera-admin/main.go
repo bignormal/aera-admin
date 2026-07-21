@@ -12,10 +12,14 @@ import (
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/admin"
+	"github.com/bignormal/aera-admin/internal/approval"
 	adminaudit "github.com/bignormal/aera-admin/internal/audit"
 	adminauth "github.com/bignormal/aera-admin/internal/auth"
+	"github.com/bignormal/aera-admin/internal/cloudadmin"
+	"github.com/bignormal/aera-admin/internal/cloudcontrol"
 	"github.com/bignormal/aera-admin/internal/config"
 	"github.com/bignormal/aera-admin/internal/httpapi"
+	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/secure"
 	"github.com/bignormal/aera-admin/internal/store"
 	"github.com/bignormal/aera-admin/internal/webui"
@@ -63,7 +67,7 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 		return err
 	}
 	defer func() { _ = redisStore.Close() }()
-	adminAPI, err := buildAdminAPI(settings, postgres, redisStore.Client())
+	runtime, err := buildAdminRuntime(settings, postgres, redisStore.Client())
 	if err != nil {
 		return err
 	}
@@ -71,36 +75,62 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 	handler := httpapi.New(httpapi.Dependencies{
 		PostgreSQL: postgres,
 		Redis:      redisStore,
-		API:        adminAPI,
+		API:        runtime.API,
 		Web:        webui.EmbeddedHandler(),
 		Production: settings.Environment == "production",
 	})
 	server := newHTTPServer(settings.ListenAddr, handler)
+	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
 	serveResult := make(chan error, 1)
+	workerResult := make(chan error, 1)
 	go func() {
 		serveResult <- server.ListenAndServe()
 	}()
+	go func() {
+		workerResult <- runtime.Worker.Run(runtimeCtx)
+	}()
+	shutdown := func() error {
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancelShutdown()
+		return server.Shutdown(shutdownCtx)
+	}
 
 	select {
 	case err := <-serveResult:
+		cancelRuntime()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return fmt.Errorf("serve Aera Admin: %w", err)
+	case err := <-workerResult:
+		cancelRuntime()
+		_ = shutdown()
+		if err == nil && ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			return errors.New("Admin Outbox Worker stopped unexpectedly")
+		}
+		return fmt.Errorf("run Admin Outbox Worker: %w", err)
 	case <-ctx.Done():
-		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancelShutdown()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		cancelRuntime()
+		if err := shutdown(); err != nil {
 			return errors.New("shut down Aera Admin")
 		}
 		return nil
 	}
 }
 
-func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *redis.Client) (http.Handler, error) {
+type adminRuntime struct {
+	API    http.Handler
+	Worker *operations.Worker
+}
+
+func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClient *redis.Client) (adminRuntime, error) {
 	passwords, err := secure.DefaultPasswordHasher()
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
 	identities, err := secure.NewIdentityCodec(secure.IdentityCodecConfig{
 		ActiveEncryptionKeyID: settings.IdentityEncryptionKeys.ActiveKeyID,
@@ -109,18 +139,18 @@ func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *
 		LookupKeys:            settings.IdentityLookupKeys.Keys,
 	})
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
 	totpSecrets, err := secure.NewSecretCodec(secure.SecretCodecConfig{
 		ActiveKeyID: settings.TOTPEncryptionKeys.ActiveKeyID,
 		Keys:        settings.TOTPEncryptionKeys.Keys,
 	})
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
 	auditService, err := adminaudit.NewService(postgres)
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
 	adminService, err := admin.NewService(admin.ServiceConfig{
 		PostgreSQL: postgres, Passwords: passwords, Identities: identities,
@@ -128,7 +158,7 @@ func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *
 		PublicURL: settings.PublicURL,
 	})
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
 	authService, err := adminauth.NewService(adminauth.ServiceConfig{
 		PostgreSQL: postgres, Redis: redisClient, RedisPrefix: "aera-admin:" + settings.Environment + ":",
@@ -136,10 +166,58 @@ func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *
 		SessionHMACKey: settings.SessionHMACKey, CSRFHMACKey: settings.CSRFHMACKey,
 	})
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
 	authHandler := adminauth.NewHandler(authService)
 	administratorHandler := admin.NewHandlerWithActivationLimiter(adminService, authService)
+	cloudClient, err := cloudadmin.NewHTTPClient(settings.CloudAdmin, time.Now)
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	operationService, err := operations.NewService(operations.ServiceConfig{
+		PostgreSQL: postgres,
+		HMACKey:    settings.OperationHMACKey,
+		Cloud:      cloudClient,
+		Audit:      auditService,
+		Clock:      time.Now,
+	})
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	approvalService, err := approval.NewService(approval.ServiceConfig{
+		PostgreSQL: postgres,
+		Cloud:      cloudClient,
+		Operations: operationService,
+		Audit:      auditService,
+		Clock:      time.Now,
+	})
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	worker, err := operations.NewWorker(operations.WorkerConfig{
+		Operations:    operationService,
+		Cloud:         cloudClient,
+		ExecutionSink: approvalService,
+		Clock:         time.Now,
+		PollInterval:  time.Second,
+		BatchSize:     8,
+		Lease:         30 * time.Second,
+	})
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	cloudService, err := cloudcontrol.NewService(cloudcontrol.ServiceConfig{
+		PostgreSQL: postgres,
+		Redis:      redisClient,
+		Cloud:      cloudClient,
+		Operations: operationService,
+		Approvals:  approvalService,
+		Audit:      auditService,
+		Clock:      time.Now,
+	})
+	if err != nil {
+		return adminRuntime{}, err
+	}
 	router := http.NewServeMux()
 	for _, path := range []string{"/auth/login", "/auth/totp/verify", "/auth/step-up", "/auth/logout", "/me"} {
 		router.Handle(path, authHandler)
@@ -147,14 +225,21 @@ func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *
 	for _, path := range []string{"/auth/activation/prepare", "/auth/activate", "/admin-users", "/admin-users/"} {
 		router.Handle(path, administratorHandler)
 	}
+	cloudHandler := cloudcontrol.NewHandler(cloudService)
+	for _, path := range []string{
+		"/cloud-users", "/cloud-users/", "/cloud-devices/", "/cloud-sessions/",
+		"/approval-requests", "/approval-requests/", "/operations/", "/system/health",
+	} {
+		router.Handle(path, cloudHandler)
+	}
 	browserSecurity, err := adminauth.NewBrowserSecurity(adminauth.BrowserSecurityConfig{
 		Service: authService, PublicURL: settings.PublicURL, SourceIPHMACKey: settings.SessionHMACKey,
 		TrustedProxyCIDRs: settings.TrustedProxyCIDRs,
 	})
 	if err != nil {
-		return nil, err
+		return adminRuntime{}, err
 	}
-	return browserSecurity.Wrap(router), nil
+	return adminRuntime{API: browserSecurity.Wrap(router), Worker: worker}, nil
 }
 
 func newHTTPServer(address string, handler http.Handler) *http.Server {
