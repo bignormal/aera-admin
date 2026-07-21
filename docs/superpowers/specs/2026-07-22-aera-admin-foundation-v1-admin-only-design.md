@@ -218,7 +218,7 @@ not_started -> queued -> executing -> reconciling -> succeeded | failed | confli
 1. BFF 校验管理会话、CSRF、Origin、RBAC 和最近 10 分钟 TOTP Step-up。
 2. 校验标准原因码、可选工单引用和 `Idempotency-Key`。
 3. Cloud 未配置或当前不可安全调用时，立即失败，不创建会在未来意外执行的延迟命令。
-4. 在同一 Admin 数据库事务中创建幂等记录、operation、Outbox 和审计意图。
+4. 在同一 Admin 数据库事务中分配 operation ID，并创建幂等记录、Outbox 和审计意图；不为此重复引入独立的本地 operation 主表。
 5. Worker 调用 Cloud；只有 Cloud 返回或对账确认最终成功后，页面才显示成功。
 6. 超时或断线进入 `reconciling`，重复请求返回同一 operation 状态。
 
