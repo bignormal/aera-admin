@@ -126,6 +126,35 @@ describe('application router', () => {
     expect(await screen.findByText('无权访问此页面')).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Cloud 用户与访问' })).not.toBeInTheDocument();
   });
+
+  it('renders the real Cloud device and session page for developers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sessionResponse('developer')));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/cloud/devices'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Cloud 设备与会话' })).toBeVisible();
+  });
+
+  it('rejects finance access to the Cloud device and session page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sessionResponse('finance')));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/cloud/devices'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('无权访问此页面')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Cloud 设备与会话' })).not.toBeInTheDocument();
+  });
 });
 
 function sessionResponse(role: string): Response {

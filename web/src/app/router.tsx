@@ -16,6 +16,7 @@ const DashboardPage = lazy(() => import('../pages/DashboardPage').then((module) 
 const AdministratorsPage = lazy(() => import('../pages/AdministratorsPage').then((module) => ({ default: module.AdministratorsPage })));
 const RolesPage = lazy(() => import('../pages/RolesPage').then((module) => ({ default: module.RolesPage })));
 const CloudUsersPage = lazy(() => import('../pages/CloudUsersPage').then((module) => ({ default: module.CloudUsersPage })));
+const CloudDevicesPage = lazy(() => import('../pages/CloudDevicesPage').then((module) => ({ default: module.CloudDevicesPage })));
 
 function suspended(content: ReactNode) {
   return <Suspense fallback={<FullPageLoader />}>{content}</Suspense>;
@@ -44,7 +45,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'cloud/devices',
-        element: <RequirePermission permission="cloud_device.read"><ModulePlaceholderPage title="设备与会话" /></RequirePermission>,
+        element: <RequirePermission permission="cloud_device.read">{suspended(<CloudDevicesPage />)}</RequirePermission>,
       },
       {
         path: 'approvals',

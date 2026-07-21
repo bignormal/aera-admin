@@ -398,6 +398,22 @@ input {
   background: #f7fbff;
 }
 
+.selected-cloud-user {
+  margin-bottom: 12px;
+  border-color: #dbe8f8;
+  background: #f8fbff;
+}
+
+.cloud-resource-card {
+  margin-bottom: 12px;
+}
+
+.operation-card {
+  margin-top: 12px;
+  border-left: 3px solid #1677ff;
+  box-shadow: 0 4px 14px rgb(16 24 40 / 4%);
+}
+
 .detail-drawer-grid {
   display: grid;
   grid-template-columns: minmax(120px, 0.4fr) minmax(220px, 1fr);
