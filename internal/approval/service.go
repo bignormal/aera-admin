@@ -388,3 +388,99 @@ func mapCloudError(err error) error {
 		return cloudadmin.ErrUnavailable
 	}
 }
+
+func executionTransitionAllowed(before ExecutionStatus, after operations.State) bool {
+	switch before {
+	case Queued:
+		return after == operations.StateExecuting || after == operations.StateReconciling ||
+			after == operations.StateSucceeded || after == operations.StateFailed || after == operations.StateConflict
+	case Executing:
+		return after == operations.StateQueued || after == operations.StateReconciling ||
+			after == operations.StateSucceeded || after == operations.StateFailed || after == operations.StateConflict
+	case Reconciling:
+		return after == operations.StateQueued || after == operations.StateExecuting ||
+			after == operations.StateSucceeded || after == operations.StateFailed || after == operations.StateConflict
+	default:
+		return false
+	}
+}
+
+func executionEvent(state operations.State) (string, error) {
+	switch state {
+	case operations.StateQueued:
+		return "execution_queued", nil
+	case operations.StateExecuting:
+		return "execution_started", nil
+	case operations.StateReconciling:
+		return "execution_reconciling", nil
+	case operations.StateSucceeded:
+		return "execution_succeeded", nil
+	case operations.StateFailed:
+		return "execution_failed", nil
+	case operations.StateConflict:
+		return "execution_conflict", nil
+	default:
+		return "", ErrStateConflict
+	}
+}
+
+func (service *Service) ApplyExecutionTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	operationID uuid.UUID,
+	next operations.State,
+	resultCode string,
+	requestID string,
+	now time.Time,
+) error {
+	if service == nil || tx == nil || operationID == uuid.Nil {
+		return ErrStateConflict
+	}
+	var request Request
+	var reviewerID *uuid.UUID
+	var reviewerRole rbac.Role
+	err := tx.QueryRow(ctx, `
+		SELECT request.id, request.target_user_id, request.approval_status,
+			request.execution_status, request.operation_id, request.reviewed_by_admin_id,
+			request.version, administrator.role
+		FROM approval_requests AS request
+		LEFT JOIN admin_users AS administrator ON administrator.id = request.reviewed_by_admin_id
+		WHERE request.operation_id = $1
+		FOR UPDATE OF request
+	`, operationID).Scan(
+		&request.ID,
+		&request.TargetUserID,
+		&request.Status,
+		&request.ExecutionStatus,
+		&request.OperationID,
+		&reviewerID,
+		&request.Version,
+		&reviewerRole,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil || request.Status != Approved || request.OperationID == nil ||
+		*request.OperationID != operationID || reviewerID == nil || reviewerRole != rbac.SuperAdmin ||
+		!executionTransitionAllowed(request.ExecutionStatus, next) {
+		return ErrStateConflict
+	}
+	eventType, err := executionEvent(next)
+	if err != nil {
+		return err
+	}
+	command, err := tx.Exec(ctx, `
+		UPDATE approval_requests
+		SET execution_status = $2, updated_at = $3, version = version + 1
+		WHERE id = $1 AND version = $4 AND approval_status = 'approved' AND operation_id = $5
+	`, request.ID, next, now.UTC(), request.Version, operationID)
+	if err != nil || command.RowsAffected() != 1 {
+		return ErrStateConflict
+	}
+	return insertEvent(
+		ctx, tx, request.ID, *reviewerID, reviewerRole, eventType,
+		string(request.ExecutionStatus), string(next), resultCode, requestID, now.UTC(),
+	)
+}
+
+var _ operations.ExecutionSink = (*Service)(nil)

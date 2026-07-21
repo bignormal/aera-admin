@@ -1,6 +1,7 @@
 package operations
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/audit"
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 var (
@@ -20,6 +22,7 @@ var (
 	ErrIdempotencyKeyReused = errors.New("idempotency key was reused for another request")
 	ErrOperationNotFound    = errors.New("operation was not found")
 	ErrCloudUnavailable     = errors.New("Cloud administration is unavailable")
+	ErrStateConflict        = errors.New("operation state changed")
 )
 
 var (
@@ -63,6 +66,26 @@ type Result struct {
 	State       State     `json:"state"`
 	ErrorCode   string    `json:"error_code,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type Job struct {
+	OperationID      uuid.UUID
+	Action           Action
+	TargetID         uuid.UUID
+	ApprovalID       *uuid.UUID
+	ActorAdminID     uuid.UUID
+	ActorRole        rbac.Role
+	ExpectedRevision int64
+	ReasonCode       string
+	TicketReference  string
+	Note             string
+	RequestID        string
+	Attempts         int
+	State            State
+}
+
+type ExecutionSink interface {
+	ApplyExecutionTx(context.Context, pgx.Tx, uuid.UUID, State, string, string, time.Time) error
 }
 
 func (request EnqueueRequest) validate() error {

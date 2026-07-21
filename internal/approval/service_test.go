@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/bignormal/aera-admin/internal/admin"
+	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/testkit"
 	"github.com/google/uuid"
@@ -82,6 +83,52 @@ func TestOperatorCanOnlyListOwnApprovalRequests(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].RequestedByAdminID != fixture.operator.AdminID {
 		t.Fatalf("operator page = %+v", page)
+	}
+}
+
+func TestApplyExecutionTxAdvancesApprovedRequestAtomically(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	fixture := newApprovalFixture(t, postgres)
+	pending := fixture.createPending(t)
+	approved, err := fixture.service.Approve(
+		context.Background(), fixture.firstSuperAdmin, pending.ID, "019f0000-0000-7000-8000-000000000099",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.OperationID == nil || approved.ExecutionStatus != Queued {
+		t.Fatalf("approved = %+v", approved)
+	}
+
+	apply := func(state operations.State, resultCode string) error {
+		tx, err := postgres.Begin(context.Background())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if err := fixture.service.ApplyExecutionTx(
+			context.Background(), tx, *approved.OperationID, state, resultCode,
+			fixture.firstSuperAdmin.Meta.RequestID, approvalClock(),
+		); err != nil {
+			return err
+		}
+		return tx.Commit(context.Background())
+	}
+	if err := apply(operations.StateExecuting, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply(operations.StateSucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+	final, err := fixture.service.Get(context.Background(), fixture.firstSuperAdmin, pending.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.ExecutionStatus != Succeeded {
+		t.Fatalf("final execution status = %s", final.ExecutionStatus)
+	}
+	if err := apply(operations.StateExecuting, ""); !errors.Is(err, ErrStateConflict) {
+		t.Fatalf("terminal execution transition error = %v", err)
 	}
 }
 
