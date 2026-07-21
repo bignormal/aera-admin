@@ -369,6 +369,35 @@ input {
   padding: 12px 14px;
 }
 
+.filter-control {
+  display: flex;
+  min-width: 170px;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.filter-control-wide {
+  min-width: 420px;
+  flex: 1;
+}
+
+.filter-control > label {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filter-error {
+  color: #d92d20;
+  font-size: 12px;
+}
+
+.lookup-result-card {
+  margin-bottom: 12px;
+  border-color: #b8d7ff;
+  background: #f7fbff;
+}
+
 .detail-drawer-grid {
   display: grid;
   grid-template-columns: minmax(120px, 0.4fr) minmax(220px, 1fr);
@@ -384,6 +413,11 @@ input {
   margin: 0;
   color: #182230;
   overflow-wrap: anywhere;
+}
+
+.drawer-primary-action {
+  width: 100%;
+  margin-top: 20px;
 }
 
 .operation-status {

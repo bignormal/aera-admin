@@ -15,6 +15,7 @@ const ActivatePage = lazy(() => import('../pages/ActivatePage').then((module) =>
 const DashboardPage = lazy(() => import('../pages/DashboardPage').then((module) => ({ default: module.DashboardPage })));
 const AdministratorsPage = lazy(() => import('../pages/AdministratorsPage').then((module) => ({ default: module.AdministratorsPage })));
 const RolesPage = lazy(() => import('../pages/RolesPage').then((module) => ({ default: module.RolesPage })));
+const CloudUsersPage = lazy(() => import('../pages/CloudUsersPage').then((module) => ({ default: module.CloudUsersPage })));
 
 function suspended(content: ReactNode) {
   return <Suspense fallback={<FullPageLoader />}>{content}</Suspense>;
@@ -39,7 +40,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'cloud/users',
-        element: <RequirePermission permission="cloud_user.read"><ModulePlaceholderPage title="用户与访问" /></RequirePermission>,
+        element: <RequirePermission permission="cloud_user.read">{suspended(<CloudUsersPage />)}</RequirePermission>,
       },
       {
         path: 'cloud/devices',

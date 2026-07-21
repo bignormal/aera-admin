@@ -83,4 +83,67 @@ describe('application router', () => {
     expect(await screen.findByText('无权访问此页面')).toBeVisible();
     expect(screen.queryByRole('heading', { name: '内部管理员' })).not.toBeInTheDocument();
   });
+
+  it('renders the real masked Cloud user page for support', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path === '/api/v1/me') return sessionResponse('support');
+        if (path.startsWith('/api/v1/cloud-users')) {
+          return new Response(JSON.stringify({ items: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected request: ${path}`);
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/cloud/users'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Cloud 用户与访问' })).toBeVisible();
+    expect(await screen.findByText('没有符合条件的数据')).toBeVisible();
+  });
+
+  it('rejects finance access to the Cloud user page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sessionResponse('finance')));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/cloud/users'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('无权访问此页面')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Cloud 用户与访问' })).not.toBeInTheDocument();
+  });
 });
+
+function sessionResponse(role: string): Response {
+  return new Response(
+    JSON.stringify({
+      csrf_token: 'csrf-in-memory-only',
+      administrator: {
+        admin_id: '019f0000-0000-7000-8000-000000000081',
+        session_id: '019f0000-0000-7000-8000-000000000082',
+        role,
+        security_version: 1,
+        mfa_authenticated_at: '2026-07-22T08:00:00Z',
+        totp_authenticated_at: '2026-07-22T08:00:00Z',
+        mfa_method: 'totp',
+      },
+      display_name: '内部人员',
+      absolute_expires_at: '2026-07-22T18:00:00Z',
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
