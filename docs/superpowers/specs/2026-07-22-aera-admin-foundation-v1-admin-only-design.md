@@ -322,3 +322,11 @@ not_started -> queued -> executing -> reconciling -> succeeded | failed | confli
 3. 完成后分别记录本地验证、提交、推送、部署和发布状态，不能互相替代。
 4. 最终代码只推送到用户指定的 `bignormal/aera-admin` 分支；不将本增量复制到其他仓库。
 5. 在 `aera-cloud` 未完成对应服务端契约前，README 和交付报告必须保留“尚未完成真实 Cloud 端到端管理”的说明。
+
+## 14. 实施状态
+
+- Admin-only 代码：本地实现并通过自动化验证。
+- Git 提交：已完成。
+- 远端推送：以最终 `git push` 结果为准。
+- `aera-cloud` 真实联调：未在本增量实施。
+- 部署与发布：未实施。

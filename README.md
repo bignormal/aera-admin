@@ -2,7 +2,9 @@
 
 Aera Admin 是 Aera 公司内部控制台，只允许获批的开发、运营、客服、财务和审计人员访问。它不向普通用户或 Workspace Owner 开放，也不复用普通 Aera 用户凭证。
 
-当前安全底座已实现独立管理员身份、密码 + 强制 TOTP、一次性恢复码、固定 RBAC、管理员邀请/暂停/角色调整/会话撤销/MFA 重置，以及追加写入的哈希链审计。Cloud 用户、设备、会话和审批菜单仍是明确标注的未接入占位页，不能视为已经交付的 Cloud 管理能力。
+当前仓库已完成独立管理员认证安全底座，以及 Admin 侧 Cloud 用户、设备、会话、双人审批、幂等和 Outbox 工作流。Cloud 管理未配置或不可达时严格失败关闭，页面不会生成演示指标或显示虚假成功。
+
+本仓库的 mTLS 与服务令牌契约已通过独立 E2E 测试进程验证；`aera-cloud` 真实 Internal Admin API 尚未在本次范围内实现，因此不能把当前状态描述为真实 Cloud 端到端管理、部署或发布。
 
 ## 本地开发
 
@@ -14,7 +16,38 @@ pnpm install --frozen-lockfile
 make check
 ```
 
-应用只从进程环境读取配置，不自动加载 `.env`。以 [`.env.example`](./.env.example) 为字段清单，为三个 key ring、Session HMAC 和 CSRF HMAC 分别生成至少 32 字节的独立随机密钥；不要提交真实值。
+应用只从进程环境读取配置，不自动加载 `.env`。以 [`.env.example`](./.env.example) 为字段清单，为三个 key ring、Session HMAC、CSRF HMAC 和 Operation HMAC 分别生成至少 32 字节的独立随机密钥；不要提交真实值。
+
+基础配置项：
+
+- `AERA_ADMIN_ENVIRONMENT`
+- `AERA_ADMIN_LISTEN_ADDR`
+- `AERA_ADMIN_PUBLIC_URL`
+- `AERA_ADMIN_DATABASE_URL`
+- `AERA_ADMIN_REDIS_ADDR`
+- `AERA_ADMIN_TRUSTED_PROXY_CIDRS`
+- `AERA_ADMIN_IDENTITY_ENCRYPTION_KEYS`
+- `AERA_ADMIN_IDENTITY_LOOKUP_KEYS`
+- `AERA_ADMIN_TOTP_ENCRYPTION_KEYS`
+- `AERA_ADMIN_SESSION_HMAC_KEY`
+- `AERA_ADMIN_CSRF_HMAC_KEY`
+- `AERA_ADMIN_OPERATION_HMAC_KEY`
+- `AERA_ADMIN_CLOUD_ENABLED`
+
+本地只验证安全底座、尚未连接 Cloud 时，将 `AERA_ADMIN_CLOUD_ENABLED` 设为 `false`；用户、设备、会话与审批查询会明确返回未配置状态，不会回退到模拟数据。
+
+启用 Cloud 管理链路时，以下配置全部必填：
+
+- `AERA_ADMIN_CLOUD_BASE_URL`
+- `AERA_ADMIN_CLOUD_CA_FILE`
+- `AERA_ADMIN_CLOUD_CLIENT_CERT_FILE`
+- `AERA_ADMIN_CLOUD_CLIENT_KEY_FILE`
+- `AERA_ADMIN_CLOUD_JWT_SIGNING_KEY_FILE`
+- `AERA_ADMIN_CLOUD_JWT_ISSUER`
+- `AERA_ADMIN_CLOUD_JWT_SUBJECT`
+- `AERA_ADMIN_CLOUD_SCOPES`
+
+CA、客户端证书、客户端私钥和 Ed25519 签名私钥必须使用仓库外的规范绝对路径，并由批准的 Secret Manager 挂载；Cloud Origin 必须使用 HTTPS，权限范围必须逐项列出，禁止通配符。
 
 ```bash
 make build
@@ -33,12 +66,12 @@ make build
 ## 验收门禁
 
 ```bash
-make check   # 格式、vet、Go/竞态/集成、前端、OpenAPI、release 构建
-make e2e     # 隔离数据库中的真实激活、登录、RBAC、会话撤销、响应头与泄漏检查
+make verify  # 格式、vet、Go/竞态/集成、前端、OpenAPI、E2E 类型与 release 构建
+make e2e     # 独立 mTLS Cloud 进程、真实认证/RBAC/审批/Outbox、双日志与审计泄漏检查
 make image   # aera-admin:security-foundation
 ```
 
-`make e2e` 只删除固定的 `aera_admin_e2e` 数据库和 `aera-admin:test:*` Redis 键，并在结束时清除包含一次性凭证的临时文件。固定资源由进程锁保护，同一台机器不能并发运行两组 E2E；它不会改动开发数据库。
+`make e2e` 临时生成 CA、服务端/客户端证书和 Ed25519 服务密钥，启动独立 Cloud 契约进程，并验证 TLS 1.3 双向认证和 audience/scope 受限的短期服务令牌。它只删除固定的 `aera_admin_e2e` 数据库和 `aera-admin:test:*` Redis 键，并在结束时清除包含一次性凭证与测试 PKI 的临时文件。固定资源由进程锁保护，同一台机器不能并发运行两组 E2E；它不会改动开发数据库。
 
 ## 容器
 
@@ -55,7 +88,8 @@ docker run --rm --env-file /secure/path/aera-admin.env -p 127.0.0.1:8080:8080 ae
 
 - 只通过公司身份网络或零信任访问层暴露；禁止直接面向公网或普通用户路由。
 - `AERA_ADMIN_PUBLIC_URL` 必须是实际 HTTPS Origin。TLS 终止代理网段必须逐项写入 `AERA_ADMIN_TRUSTED_PROXY_CIDRS`；部署审查必须拒绝 `0.0.0.0/0`、`::/0` 等全网信任配置。
-- 身份加密、精确查找 HMAC、TOTP 加密、Session HMAC 和 CSRF HMAC 使用彼此独立的密钥，并从批准的 Secret Manager/KMS 注入。轮换时先在 key ring 中保留旧读取密钥。
+- 身份加密、精确查找 HMAC、TOTP 加密、Session HMAC、CSRF HMAC 和 Operation HMAC 使用彼此独立的密钥，并从批准的 Secret Manager/KMS 注入。轮换时先在 key ring 中保留旧读取密钥。
+- Cloud 管理只允许独立 mTLS 客户端身份和 audience/scope 受限的短期 Ed25519 服务令牌；不得关闭证书校验、跟随重定向或把私钥放入镜像。
 - PostgreSQL 使用 `verify-full` TLS 和最小权限运行身份；Redis 位于私有网络。不得把开发 Compose 密码用于生产。
 - 生产模式才发送 HSTS；所有环境均发送 CSP、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、跨源打开器/资源策略与权限策略。
 - 日志、审计、告警和工单不得包含完整邮箱、密码、TOTP/恢复码、激活令牌、Session Cookie 或 CSRF 值。

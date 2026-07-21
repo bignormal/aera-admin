@@ -18,7 +18,7 @@ install:
 	pnpm install --frozen-lockfile
 
 format-check:
-	@unformatted="$$(gofmt -l $$(find api cmd internal -name '*.go' -type f))"; \
+	@unformatted="$$(gofmt -l $$(find api cmd internal e2e/cloud-stub -name '*.go' -type f))"; \
 	if [ -n "$$unformatted" ]; then echo "Go files require gofmt:" >&2; echo "$$unformatted" >&2; exit 1; fi
 
 vet:
@@ -28,10 +28,10 @@ test:
 	go test ./... -count=1
 
 test-integration: dependencies-up
-	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test ./internal/store ./internal/audit ./internal/admin ./internal/auth -count=1
+	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test ./internal/store ./internal/audit ./internal/admin ./internal/auth ./internal/cloudadmin ./internal/operations ./internal/approval ./internal/cloudcontrol -count=1
 
 race: dependencies-up
-	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test -race ./internal/audit ./internal/admin ./internal/auth -count=1
+	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test -race ./internal/audit ./internal/admin ./internal/auth ./internal/cloudadmin ./internal/operations ./internal/approval ./internal/cloudcontrol -count=1
 
 web-check: install
 	pnpm --filter @aera/admin-web lint
