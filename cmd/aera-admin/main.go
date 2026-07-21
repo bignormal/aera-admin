@@ -13,12 +13,14 @@ import (
 
 	"github.com/bignormal/aera-admin/internal/admin"
 	adminaudit "github.com/bignormal/aera-admin/internal/audit"
+	adminauth "github.com/bignormal/aera-admin/internal/auth"
 	"github.com/bignormal/aera-admin/internal/config"
 	"github.com/bignormal/aera-admin/internal/httpapi"
 	"github.com/bignormal/aera-admin/internal/secure"
 	"github.com/bignormal/aera-admin/internal/store"
 	"github.com/bignormal/aera-admin/internal/webui"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -61,7 +63,7 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 		return err
 	}
 	defer func() { _ = redisStore.Close() }()
-	adminAPI, err := buildAdminAPI(settings, postgres)
+	adminAPI, err := buildAdminAPI(settings, postgres, redisStore.Client())
 	if err != nil {
 		return err
 	}
@@ -89,7 +91,7 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 	}
 }
 
-func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool) (http.Handler, error) {
+func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *redis.Client) (http.Handler, error) {
 	passwords, err := secure.DefaultPasswordHasher()
 	if err != nil {
 		return nil, err
@@ -122,7 +124,30 @@ func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool) (http.Handler
 	if err != nil {
 		return nil, err
 	}
-	return admin.NewHandler(adminService), nil
+	authService, err := adminauth.NewService(adminauth.ServiceConfig{
+		PostgreSQL: postgres, Redis: redisClient, RedisPrefix: "aera-admin:" + settings.Environment + ":",
+		Passwords: passwords, Identities: identities, TOTPSecrets: totpSecrets, TOTP: secure.DefaultTOTP(), Audit: auditService,
+		SessionHMACKey: settings.SessionHMACKey, CSRFHMACKey: settings.CSRFHMACKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	authHandler := adminauth.NewHandler(authService)
+	administratorHandler := admin.NewHandlerWithActivationLimiter(adminService, authService)
+	router := http.NewServeMux()
+	for _, path := range []string{"/auth/login", "/auth/totp/verify", "/auth/step-up", "/auth/logout", "/me"} {
+		router.Handle(path, authHandler)
+	}
+	for _, path := range []string{"/auth/activation/prepare", "/auth/activate", "/admin-users", "/admin-users/"} {
+		router.Handle(path, administratorHandler)
+	}
+	browserSecurity, err := adminauth.NewBrowserSecurity(adminauth.BrowserSecurityConfig{
+		Service: authService, PublicURL: settings.PublicURL, SourceIPHMACKey: settings.SessionHMACKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return browserSecurity.Wrap(router), nil
 }
 
 func newHTTPServer(address string, handler http.Handler) *http.Server {

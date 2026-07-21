@@ -13,6 +13,22 @@ import (
 
 const auditChainAdvisoryLockID int64 = 0x41455241415544
 
+func lockAuditActor(ctx context.Context, tx pgx.Tx, actorID *uuid.UUID) error {
+	if actorID == nil {
+		return nil
+	}
+	var lockedID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM admin_users
+		WHERE id = $1
+		FOR KEY SHARE
+	`, *actorID).Scan(&lockedID); err != nil {
+		return errors.New("administrator audit actor could not be locked")
+	}
+	return nil
+}
+
 func lockAuditChain(ctx context.Context, tx pgx.Tx) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, auditChainAdvisoryLockID); err != nil {
 		return errors.New("administrator audit chain lock could not be acquired")

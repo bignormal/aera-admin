@@ -68,6 +68,9 @@ func (service *Service) AppendTx(ctx context.Context, tx pgx.Tx, record Record) 
 }
 
 func (service *Service) appendPreparedTx(ctx context.Context, tx pgx.Tx, record Record) (uuid.UUID, error) {
+	if err := lockAuditActor(ctx, tx, record.ActorAdminID); err != nil {
+		return uuid.Nil, err
+	}
 	if err := lockAuditChain(ctx, tx); err != nil {
 		return uuid.Nil, err
 	}

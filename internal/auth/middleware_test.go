@@ -93,6 +93,43 @@ func TestPrincipalContextDoesNotAcceptForeignContextValues(t *testing.T) {
 	}
 }
 
+func TestRequireRecentTOTPRejectsRecoveryAndStaleAuthentication(t *testing.T) {
+	now := time.Date(2026, 7, 21, 16, 0, 0, 0, time.UTC)
+	for name, principal := range map[string]Principal{
+		"recovery": {
+			AdminID: "00000000-0000-4000-8000-000000000001", Role: rbac.SuperAdmin,
+			MFAMethod: MFAMethodRecovery, MFAAuthenticatedAt: now,
+		},
+		"stale": {
+			AdminID: "00000000-0000-4000-8000-000000000001", Role: rbac.SuperAdmin,
+			MFAMethod: MFAMethodTOTP, MFAAuthenticatedAt: now.Add(-11 * time.Minute),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := WithPrincipal(httptest.NewRequest(http.MethodPost, "/dangerous", nil), principal)
+			response := httptest.NewRecorder()
+			RequireRecentTOTP(func() time.Time { return now }, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("high-risk handler ran without recent TOTP")
+			})).ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", response.Code)
+			}
+			assertAPIError(t, response, "STEP_UP_REQUIRED")
+		})
+	}
+	fresh := Principal{
+		AdminID: "00000000-0000-4000-8000-000000000001", Role: rbac.SuperAdmin,
+		MFAMethod: MFAMethodTOTP, MFAAuthenticatedAt: now.Add(-10 * time.Minute),
+	}
+	response := httptest.NewRecorder()
+	RequireRecentTOTP(func() time.Time { return now }, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, WithPrincipal(httptest.NewRequest(http.MethodPost, "/dangerous", nil), fresh))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("fresh status = %d, want 204", response.Code)
+	}
+}
+
 func assertAPIError(t *testing.T, response *httptest.ResponseRecorder, code string) {
 	t.Helper()
 	if contentType := response.Header().Get("Content-Type"); contentType != "application/json" {

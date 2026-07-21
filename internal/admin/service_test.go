@@ -383,8 +383,8 @@ func (fixture *adminFixture) insertSession(t *testing.T, adminID uuid.UUID, role
 	if _, err := fixture.postgres.Exec(context.Background(), `
 		INSERT INTO admin_sessions (
 			id, admin_user_id, token_hmac, csrf_hmac, security_version, role,
-			mfa_authenticated_at, created_at, last_seen_at, idle_expires_at, absolute_expires_at
-		) VALUES ($1, $2, $3, $4, 1, $5, $6, $6, $6, $7, $8)
+			mfa_method, mfa_authenticated_at, created_at, last_seen_at, idle_expires_at, absolute_expires_at
+		) VALUES ($1, $2, $3, $4, 1, $5, 'totp', $6, $6, $6, $7, $8)
 	`, uuid.New(), adminID, bytes.Repeat([]byte{4}, 32), bytes.Repeat([]byte{5}, 32), role,
 		createdAt, fixture.now.Add(30*time.Minute), fixture.now.Add(8*time.Hour)); err != nil {
 		t.Fatalf("insert administrator session: %v", err)

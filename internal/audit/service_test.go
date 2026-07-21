@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/testkit"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestAppendChainsCanonicalEventsWithoutSensitiveFields(t *testing.T) {
@@ -118,6 +120,103 @@ func TestConcurrentAppendMaintainsOneVerifiableChain(t *testing.T) {
 	if err := service.Verify(ctx); err != nil {
 		t.Fatalf("Verify() after concurrent append error = %v", err)
 	}
+}
+
+func TestAppendLocksActorBeforeAuditChain(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	service, err := NewService(postgres)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	actorID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := postgres.Exec(ctx, `
+		INSERT INTO admin_users (id, display_name, role, status, created_at, updated_at)
+		VALUES ($1, 'Audit Actor', 'super_admin', 'active', $2, $2)
+	`, actorID, now); err != nil {
+		t.Fatalf("insert audit actor: %v", err)
+	}
+
+	actorBlocker, err := postgres.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin actor blocker: %v", err)
+	}
+	defer func() { _ = actorBlocker.Rollback(context.Background()) }()
+	if _, err := actorBlocker.Exec(ctx, `SELECT id FROM admin_users WHERE id = $1 FOR UPDATE`, actorID); err != nil {
+		t.Fatalf("lock audit actor: %v", err)
+	}
+
+	appendTx, err := postgres.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin append transaction: %v", err)
+	}
+	defer func() { _ = appendTx.Rollback(context.Background()) }()
+	var appendPID int32
+	if err := appendTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&appendPID); err != nil {
+		t.Fatalf("read append backend PID: %v", err)
+	}
+	record := validRecord("admin_authorization_denied", "req-lock-order")
+	record.ActorAdminID = &actorID
+	record.ActorRole = rbac.SuperAdmin
+	appendResult := make(chan error, 1)
+	go func() {
+		_, appendErr := service.AppendTx(ctx, appendTx, record)
+		appendResult <- appendErr
+	}()
+
+	waitForPostgresLock(t, ctx, postgres, appendPID)
+	probe, err := postgres.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin advisory lock probe: %v", err)
+	}
+	var acquired bool
+	if err := probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, auditChainAdvisoryLockID).Scan(&acquired); err != nil {
+		_ = probe.Rollback(context.Background())
+		t.Fatalf("probe audit advisory lock: %v", err)
+	}
+	if err := probe.Rollback(ctx); err != nil {
+		t.Fatalf("release advisory lock probe: %v", err)
+	}
+	if !acquired {
+		_ = actorBlocker.Rollback(context.Background())
+		<-appendResult
+		t.Fatal("audit chain lock was acquired before the actor row lock")
+	}
+
+	if err := actorBlocker.Rollback(ctx); err != nil {
+		t.Fatalf("release audit actor: %v", err)
+	}
+	if err := <-appendResult; err != nil {
+		t.Fatalf("AppendTx() error = %v", err)
+	}
+	if err := appendTx.Commit(ctx); err != nil {
+		t.Fatalf("commit append transaction: %v", err)
+	}
+}
+
+func waitForPostgresLock(t *testing.T, ctx context.Context, postgres interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, processID int32) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var waitEventType string
+		if err := postgres.QueryRow(ctx, `
+			SELECT COALESCE(wait_event_type, '')
+			FROM pg_stat_activity
+			WHERE pid = $1
+		`, processID).Scan(&waitEventType); err != nil {
+			t.Fatalf("read append wait state: %v", err)
+		}
+		if waitEventType == "Lock" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("append transaction did not wait on the actor row lock")
 }
 
 func TestVerifyDetectsExternalTampering(t *testing.T) {

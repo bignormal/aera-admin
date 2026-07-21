@@ -9,11 +9,12 @@ import (
 )
 
 type Principal struct {
-	AdminID            string
-	SessionID          string
-	Role               rbac.Role
-	SecurityVersion    int64
-	MFAAuthenticatedAt time.Time
+	AdminID            string    `json:"admin_id"`
+	SessionID          string    `json:"session_id"`
+	Role               rbac.Role `json:"role"`
+	SecurityVersion    int64     `json:"security_version"`
+	MFAAuthenticatedAt time.Time `json:"mfa_authenticated_at"`
+	MFAMethod          MFAMethod `json:"mfa_method"`
 }
 
 type principalContextKey struct{}

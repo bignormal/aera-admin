@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bignormal/aera-admin/internal/audit"
 	"github.com/bignormal/aera-admin/internal/auth"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/bignormal/aera-admin/internal/secure"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -31,20 +35,38 @@ type HandlerService interface {
 	ResetTOTP(context.Context, Actor, uuid.UUID, ActionReason) (InvitationResult, error)
 }
 
+type ActivationAttemptLimiter interface {
+	CheckActivationAttempts(context.Context, []byte, []byte) (time.Duration, error)
+	RecordActivationFailure(context.Context, []byte, []byte) (time.Duration, error)
+	ClearActivationFailures(context.Context, []byte) error
+}
+
 func NewHandler(service HandlerService) http.Handler {
+	return newHandler(service, nil)
+}
+
+func NewHandlerWithActivationLimiter(service HandlerService, limiter ActivationAttemptLimiter) http.Handler {
+	return newHandler(service, limiter)
+}
+
+func newHandler(service HandlerService, limiter ActivationAttemptLimiter) http.Handler {
 	router := chi.NewRouter()
-	router.Post("/auth/activation/prepare", prepareActivationHTTP(service))
-	router.Post("/auth/activate", activateHTTP(service))
+	router.Post("/auth/activation/prepare", prepareActivationHTTP(service, limiter))
+	router.Post("/auth/activate", activateHTTP(service, limiter))
 	router.With(requirePermission(rbac.ReadAdministrators)).Get("/admin-users", listAdministratorsHTTP(service))
-	router.With(requirePermission(rbac.ManageAdministrators)).Post("/admin-users/invitations", inviteAdministratorHTTP(service))
-	router.With(requirePermission(rbac.ManageAdministrators)).Put("/admin-users/{adminID}/role", changeAdministratorRoleHTTP(service))
-	router.With(requirePermission(rbac.ManageAdministrators)).Post("/admin-users/{adminID}/suspend", suspendAdministratorHTTP(service))
-	router.With(requirePermission(rbac.ManageAdministrators)).Post("/admin-users/{adminID}/totp/reset", resetAdministratorTOTPHTTP(service))
+	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/invitations", inviteAdministratorHTTP(service))
+	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Put("/admin-users/{adminID}/role", changeAdministratorRoleHTTP(service))
+	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/{adminID}/suspend", suspendAdministratorHTTP(service))
+	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/{adminID}/totp/reset", resetAdministratorTOTPHTTP(service))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		router.ServeHTTP(response, request)
 	})
+}
+
+func requireRecentTOTP(next http.Handler) http.Handler {
+	return auth.RequireRecentTOTP(time.Now, next)
 }
 
 func requirePermission(permission rbac.Permission) func(http.Handler) http.Handler {
@@ -90,7 +112,7 @@ func inviteAdministratorHTTP(service HandlerService) http.HandlerFunc {
 	}
 }
 
-func prepareActivationHTTP(service HandlerService) http.HandlerFunc {
+func prepareActivationHTTP(service HandlerService, limiter ActivationAttemptLimiter) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Token string `json:"token"`
@@ -99,8 +121,15 @@ func prepareActivationHTTP(service HandlerService) http.HandlerFunc {
 			writeHTTPError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效")
 			return
 		}
+		subjectDigest := activationAttemptDigest(payload.Token)
+		meta := requestMetaFromRequest(request)
+		if err := checkActivationAttempts(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC); err != nil {
+			writeAdminDomainError(response, err)
+			return
+		}
 		result, err := service.PrepareActivation(request.Context(), payload.Token)
 		if err != nil {
+			err = recordActivationFailure(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC, err)
 			writeAdminDomainError(response, err)
 			return
 		}
@@ -108,7 +137,7 @@ func prepareActivationHTTP(service HandlerService) http.HandlerFunc {
 	}
 }
 
-func activateHTTP(service HandlerService) http.HandlerFunc {
+func activateHTTP(service HandlerService, limiter ActivationAttemptLimiter) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Token    string `json:"token"`
@@ -119,16 +148,29 @@ func activateHTTP(service HandlerService) http.HandlerFunc {
 			writeHTTPError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效")
 			return
 		}
+		subjectDigest := activationAttemptDigest(payload.Token)
+		meta := requestMetaFromRequest(request)
+		if err := checkActivationAttempts(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC); err != nil {
+			payload.Password = ""
+			payload.TOTPCode = ""
+			payload.Token = ""
+			writeAdminDomainError(response, err)
+			return
+		}
 		result, err := service.Activate(request.Context(), ActivateRequest{
 			Token: payload.Token, Password: payload.Password, TOTPCode: payload.TOTPCode,
-			Meta: requestMetaFromRequest(request),
+			Meta: meta,
 		})
 		payload.Password = ""
 		payload.TOTPCode = ""
 		payload.Token = ""
 		if err != nil {
+			err = recordActivationFailure(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC, err)
 			writeAdminDomainError(response, err)
 			return
+		}
+		if limiter != nil {
+			_ = limiter.ClearActivationFailures(request.Context(), subjectDigest)
 		}
 		writeAdminJSON(response, http.StatusOK, result)
 	}
@@ -249,6 +291,11 @@ func actorAndTargetFromRequest(request *http.Request) (Actor, uuid.UUID, bool) {
 }
 
 func requestMetaFromRequest(request *http.Request) RequestMeta {
+	if meta, ok := auth.RequestMetaFromContext(request.Context()); ok {
+		return RequestMeta{
+			RequestID: meta.RequestID, SourceIPHMAC: append([]byte(nil), meta.SourceIPHMAC...), UserAgent: meta.UserAgent,
+		}
+	}
 	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
 	if !httpRequestIDPattern.MatchString(requestID) {
 		requestID = "req-" + uuid.NewString()
@@ -275,7 +322,20 @@ func decodeAdminJSON(response http.ResponseWriter, request *http.Request, target
 }
 
 func writeAdminDomainError(response http.ResponseWriter, err error) {
+	var rateLimit *auth.RateLimitError
 	switch {
+	case errors.As(err, &rateLimit):
+		seconds := int(math.Ceil(rateLimit.RetryAfter.Seconds()))
+		if seconds < 1 {
+			seconds = 1
+		}
+		if seconds > 900 {
+			seconds = 900
+		}
+		response.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeHTTPError(response, http.StatusTooManyRequests, "RATE_LIMITED", "尝试过于频繁，请稍后重试")
+	case errors.Is(err, auth.ErrUnavailable):
+		writeHTTPError(response, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "认证服务暂时不可用")
 	case errors.Is(err, ErrInvalidInvitation), errors.Is(err, ErrInvalidActivation):
 		writeHTTPError(response, http.StatusBadRequest, "ACTIVATION_INVALID", "激活信息无效或已过期")
 	case errors.Is(err, ErrInvalidRequest), errors.Is(err, audit.ErrInvalidRecord), errors.Is(err, audit.ErrSensitiveText):
@@ -299,6 +359,48 @@ func writeAdminDomainError(response http.ResponseWriter, err error) {
 	default:
 		writeHTTPError(response, http.StatusInternalServerError, "INTERNAL_ERROR", "服务暂时不可用")
 	}
+}
+
+func activationAttemptDigest(rawToken string) []byte {
+	digest := secure.DigestOpaqueToken(rawToken)
+	return append([]byte(nil), digest[:]...)
+}
+
+func checkActivationAttempts(
+	ctx context.Context,
+	limiter ActivationAttemptLimiter,
+	subjectDigest, sourceIPHMAC []byte,
+) error {
+	if limiter == nil {
+		return nil
+	}
+	retryAfter, err := limiter.CheckActivationAttempts(ctx, subjectDigest, sourceIPHMAC)
+	if err != nil {
+		return auth.ErrUnavailable
+	}
+	if retryAfter > 0 {
+		return &auth.RateLimitError{RetryAfter: retryAfter}
+	}
+	return nil
+}
+
+func recordActivationFailure(
+	ctx context.Context,
+	limiter ActivationAttemptLimiter,
+	subjectDigest, sourceIPHMAC []byte,
+	domainErr error,
+) error {
+	if limiter == nil || (!errors.Is(domainErr, ErrInvalidInvitation) && !errors.Is(domainErr, ErrInvalidActivation)) {
+		return domainErr
+	}
+	retryAfter, err := limiter.RecordActivationFailure(ctx, subjectDigest, sourceIPHMAC)
+	if err != nil {
+		return auth.ErrUnavailable
+	}
+	if retryAfter > 0 {
+		return &auth.RateLimitError{RetryAfter: retryAfter}
+	}
+	return domainErr
 }
 
 func writeHTTPError(response http.ResponseWriter, status int, code, message string) {

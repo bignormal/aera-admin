@@ -225,7 +225,7 @@ Run: `go test ./internal/config ./internal/httpapi ./internal/store`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add go.mod go.sum cmd/aera-admin internal/config internal/httpapi internal/store .env.example
@@ -860,14 +860,21 @@ git commit -m "feat: add administrator invitation lifecycle"
 - Create: `internal/auth/service_test.go`
 - Create: `internal/auth/http.go`
 - Create: `internal/auth/http_test.go`
+- Create: `internal/auth/browser.go`
+- Create: `internal/auth/browser_test.go`
+- Create: `internal/auth/limiter.go`
+- Create: `internal/store/migrations/000003_session_mfa_method.sql`
 - Modify: `cmd/aera-admin/main.go`
-- Modify: `internal/httpapi/server.go`
+- Modify: `cmd/aera-admin/main_test.go`
+- Modify: `internal/admin/http.go`
+- Modify: `internal/admin/http_test.go`
+- Modify: `Makefile`
 
 **Interfaces:**
 - Produces the shared `SessionManager` and `Principal`.
 - Produces browser endpoints `/auth/login`, `/auth/totp/verify`, `/auth/step-up`, `/auth/logout`, and `/me` below `/api/v1`.
 
-- [ ] **Step 1: Test that password success alone cannot create a session**
+- [x] **Step 1: Test that password success alone cannot create a session**
 
 ```go
 func TestLoginRequiresTOTPBeforeSession(t *testing.T) {
@@ -879,15 +886,17 @@ func TestLoginRequiresTOTPBeforeSession(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test generic errors and rate limits**
+- [x] **Step 2: Test generic errors and rate limits**
 
 Unknown email, wrong password, wrong TOTP, expired challenge, replayed TOTP, and suspended account must return the same public `AUTH_INVALID_CREDENTIALS` where revealing the distinction would enumerate an account. Rate-limit responses use `RATE_LIMITED` and a bounded `Retry-After`.
 
-- [ ] **Step 3: Implement PostgreSQL-authoritative and Redis-live sessions**
+The Redis limiter uses only HMAC/SHA-256 subject digests and source-IP HMACs. Password success creates a challenge but does not clear the account failure counter; only completed MFA clears it, preventing password-assisted TOTP brute-force bypass.
 
-Creation writes a hashed session row and Redis live-session record; failure to write Redis revokes the PostgreSQL row and returns unavailable. Authentication requires Redis, verifies the token HMAC in constant time, checks idle/absolute expiry and security version, and updates last-seen with bounded write frequency. There is no PostgreSQL fallback while Redis is unavailable.
+- [x] **Step 3: Implement PostgreSQL-authoritative and Redis-live sessions**
 
-- [ ] **Step 4: Test CSRF, Origin, cookie, and logout**
+Creation writes a hashed session row and Redis live-session record; failure to write Redis revokes the PostgreSQL row and returns unavailable. Authentication requires Redis, verifies the token HMAC in constant time, checks idle/absolute expiry and security version, and updates `last_seen_at` with bounded write frequency. Every authenticated request refreshes the authoritative database idle deadline and Redis TTL to preserve a precise 30-minute inactivity window, capped by the 8-hour absolute deadline. There is no PostgreSQL fallback while Redis is unavailable. Migration `000003` records whether the session was established by TOTP or a recovery code.
+
+- [x] **Step 4: Test CSRF, Origin, cookie, and logout**
 
 ```go
 func TestLoginCookieUsesHostSecurityAttributes(t *testing.T) {
@@ -904,17 +913,19 @@ func TestMutationRequiresMatchingOriginAndCSRF(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Implement step-up and recovery-code use**
+- [x] **Step 5: Implement step-up and recovery-code use**
 
 Step-up validates a fresh, non-replayed TOTP and updates only `mfa_authenticated_at`. A recovery code can complete login once, is atomically consumed, revokes all older sessions, and emits a high-severity audit event.
 
-- [ ] **Step 6: Verify complete auth flow**
+The browser middleware derives a deterministic CSRF token from the HttpOnly session token so `/me` can safely reissue it after reload, requires the exact configured origin for every unsafe method, and records sanitized `401`, `403`, `429`, and activation-failure outcomes without credential material. High-risk administrator mutations require a TOTP-authenticated session no older than 10 minutes.
+
+- [x] **Step 6: Verify complete auth flow**
 
 Run: `go test ./internal/auth ./internal/admin ./internal/httpapi -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/auth internal/httpapi cmd/aera-admin/main.go

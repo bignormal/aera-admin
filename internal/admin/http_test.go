@@ -106,6 +106,36 @@ func TestAdministratorHTTPMapsStableDomainErrors(t *testing.T) {
 	assertNoStoreJSON(t, response)
 }
 
+func TestAdministratorMutationRequiresRecentTOTP(t *testing.T) {
+	fake := &fakeHandlerService{invitation: InvitationResult{InvitationID: uuid.New(), AdminID: uuid.New(), ActivationURL: "https://admin.example.test/activate#token=one-time-token"}}
+	handler := NewHandler(fake)
+	stale := principal(uuid.New(), rbac.SuperAdmin)
+	stale.MFAAuthenticatedAt = time.Now().Add(-11 * time.Minute)
+	response := serveAdminHTTP(
+		handler,
+		http.MethodPost,
+		"/admin-users/invitations",
+		`{"email":"admin@example.com","display_name":"管理员","role":"support","reason_code":"staff_change"}`,
+		stale,
+	)
+	if response.Code != http.StatusForbidden || fake.inviteCalls != 0 || !strings.Contains(response.Body.String(), `"code":"STEP_UP_REQUIRED"`) {
+		t.Fatalf("stale mutation response/calls = %d/%d %q", response.Code, fake.inviteCalls, response.Body.String())
+	}
+}
+
+func TestActivationHTTPAppliesDigestBasedRateLimitBeforeService(t *testing.T) {
+	fake := &fakeHandlerService{}
+	limiter := &fakeActivationLimiter{checkRetry: 2 * time.Second}
+	handler := NewHandlerWithActivationLimiter(fake, limiter)
+	response := serveAdminHTTP(handler, http.MethodPost, "/auth/activation/prepare", `{"token":"raw-invitation-token"}`, nil)
+	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "2" || fake.prepareToken != "" {
+		t.Fatalf("rate-limited activation response/token = %d %q / %q", response.Code, response.Body.String(), fake.prepareToken)
+	}
+	if len(limiter.subjectDigest) != 32 || bytes.Contains(limiter.subjectDigest, []byte("raw-invitation-token")) {
+		t.Fatalf("activation limiter received non-digest subject: %x", limiter.subjectDigest)
+	}
+}
+
 type fakeHandlerService struct {
 	invitation     InvitationResult
 	preparation    ActivationPreparation
@@ -164,7 +194,10 @@ func serveAdminHTTP(handler http.Handler, method, path, body string, authPrincip
 }
 
 func principal(id uuid.UUID, role rbac.Role) *auth.Principal {
-	return &auth.Principal{AdminID: id.String(), SessionID: uuid.NewString(), Role: role, SecurityVersion: 1}
+	return &auth.Principal{
+		AdminID: id.String(), SessionID: uuid.NewString(), Role: role, SecurityVersion: 1,
+		MFAMethod: auth.MFAMethodTOTP, MFAAuthenticatedAt: time.Now(),
+	}
 }
 
 func assertNoStoreJSON(t *testing.T, response *httptest.ResponseRecorder) {
@@ -179,3 +212,25 @@ func assertNoStoreJSON(t *testing.T, response *httptest.ResponseRecorder) {
 }
 
 var _ HandlerService = (*fakeHandlerService)(nil)
+
+type fakeActivationLimiter struct {
+	checkRetry    time.Duration
+	failureRetry  time.Duration
+	subjectDigest []byte
+}
+
+func (fake *fakeActivationLimiter) CheckActivationAttempts(_ context.Context, subjectDigest, _ []byte) (time.Duration, error) {
+	fake.subjectDigest = append([]byte(nil), subjectDigest...)
+	return fake.checkRetry, nil
+}
+
+func (fake *fakeActivationLimiter) RecordActivationFailure(_ context.Context, subjectDigest, _ []byte) (time.Duration, error) {
+	fake.subjectDigest = append([]byte(nil), subjectDigest...)
+	return fake.failureRetry, nil
+}
+
+func (fake *fakeActivationLimiter) ClearActivationFailures(context.Context, []byte) error {
+	return nil
+}
+
+var _ ActivationAttemptLimiter = (*fakeActivationLimiter)(nil)
