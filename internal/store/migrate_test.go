@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -57,8 +59,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 4 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 4/32", migrationCount, checksumLength)
+	if migrationCount != 5 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 5/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int
@@ -75,6 +77,62 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	}
 	if err := Migrate(ctx, postgres); err == nil {
 		t.Fatal("Migrate() accepted a changed checksum")
+	}
+}
+
+func TestMigrateCreatesConstrainedCloudControlSchema(t *testing.T) {
+	postgres := testPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if err := Migrate(ctx, postgres); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	for _, table := range []string{
+		"approval_requests",
+		"approval_events",
+		"admin_idempotency_records",
+		"admin_outbox",
+	} {
+		assertTableExists(t, ctx, postgres, table)
+	}
+	assertCheckConstraint(t, ctx, postgres, "approval_requests", "approval_requests_approval_status_check")
+	assertCheckConstraint(t, ctx, postgres, "approval_requests", "approval_requests_execution_status_check")
+	assertCheckConstraint(t, ctx, postgres, "admin_outbox", "admin_outbox_status_check")
+	assertUniqueColumns(t, ctx, postgres, "admin_idempotency_records", "admin_idempotency_actor_key", []string{
+		"actor_admin_id", "action", "idempotency_key_hmac",
+	})
+
+	actorID := uuid.New()
+	seedActiveAdministrator(t, ctx, postgres, actorID, rbac.Operator)
+	requestID := uuid.New()
+	_, err := postgres.Exec(ctx, `
+		INSERT INTO approval_requests (
+			id, action, target_user_id, target_snapshot, requested_by_admin_id, requested_by_role,
+			reason_code, expected_revision, approval_status, execution_status, expires_at,
+			created_at, updated_at, version
+		) VALUES ($1, 'disable_user', $2, $3, $4, 'operator', 'policy_violation', 7,
+			'pending_review', 'not_started', now() + interval '24 hours', now(), now(), 1)
+	`, requestID, uuid.New(), `{"user_id":"019f0000-0000-7000-8000-000000000001","masked_email":"a***@example.test"}`, actorID)
+	if err != nil {
+		t.Fatalf("insert approval request: %v", err)
+	}
+
+	eventID := uuid.New()
+	_, err = postgres.Exec(ctx, `
+		INSERT INTO approval_events (
+			id, approval_request_id, actor_admin_id, actor_role, event_type,
+			before_status, after_status, request_id, created_at
+		) VALUES ($1, $2, $3, 'operator', 'created', '', 'pending_review', 'req-schema', now())
+	`, eventID, requestID, actorID)
+	if err != nil {
+		t.Fatalf("insert approval event: %v", err)
+	}
+	if _, err := postgres.Exec(ctx, `UPDATE approval_events SET event_type = 'cancelled' WHERE id = $1`, eventID); err == nil {
+		t.Fatal("approval event update unexpectedly succeeded")
+	}
+	if _, err := postgres.Exec(ctx, `DELETE FROM approval_events WHERE id = $1`, eventID); err == nil {
+		t.Fatal("approval event delete unexpectedly succeeded")
 	}
 }
 
@@ -155,6 +213,17 @@ func testPostgres(t *testing.T) *pgxpool.Pool {
 		adminPool.Close()
 	})
 	return postgres
+}
+
+func seedActiveAdministrator(t *testing.T, ctx context.Context, postgres *pgxpool.Pool, id uuid.UUID, role rbac.Role) {
+	t.Helper()
+	_, err := postgres.Exec(ctx, `
+		INSERT INTO admin_users (id, display_name, role, status, security_version, created_at, updated_at)
+		VALUES ($1, 'Schema Actor', $2, 'active', 1, now(), now())
+	`, id, role)
+	if err != nil {
+		t.Fatalf("seed active administrator: %v", err)
+	}
 }
 
 func assertTableExists(t *testing.T, ctx context.Context, postgres *pgxpool.Pool, table string) {
