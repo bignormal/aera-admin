@@ -49,14 +49,16 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	assertCheckConstraintContains(t, ctx, postgres, "admin_invitations", "admin_invitations_totp_secret_check", "num_nonnulls")
 	assertCheckConstraintContains(t, ctx, postgres, "admin_invitations", "admin_invitations_totp_secret_check", "consumed_at")
 	assertCheckConstraint(t, ctx, postgres, "admin_sessions", "admin_sessions_mfa_method_check")
+	assertColumnType(t, ctx, postgres, "admin_sessions", "totp_authenticated_at", "timestamp with time zone")
+	assertCheckConstraint(t, ctx, postgres, "admin_sessions", "admin_sessions_totp_time_check")
 
 	var migrationCount int
 	var checksumLength int
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 3 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 3/32", migrationCount, checksumLength)
+	if migrationCount != 4 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 4/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int

@@ -155,7 +155,7 @@ invited -> active -> suspended
 - 登录先校验密码，再校验 TOTP；TOTP 未通过前不创建管理会话。
 - 每个 TOTP 时间步只能成功使用一次；服务端保存最近接受的时间步，阻止同一码重放。
 - 登录错误统一返回凭证无效，避免管理员账号枚举。
-- 失败按账号和 IP 双维度限速，并采用渐进延迟和临时锁定。
+- 失败按账号和 IP 双维度限速，并采用 Redis 原子预验证预约、渐进延迟和临时锁定；已有锁必须在密码、TOTP、恢复码或激活凭证校验前拒绝请求，并发请求不得越过策略阈值。
 
 ### 5.3 管理会话
 
@@ -494,6 +494,7 @@ reason_codes
 - React 静态资源嵌入 Admin Go 二进制，同源提供页面与 API。
 - 页面响应设置严格 CSP、`frame-ancestors 'none'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 和 HSTS；不允许第三方脚本。
 - Admin 入口位于公司 VPN、Zero Trust 网关或固定出口白名单之后。
+- HTTPS 终止代理必须通过 `AERA_ADMIN_TRUSTED_PROXY_CIDRS` 明确列出；仅信任来自这些网络对等端的 `X-Forwarded-For`，并从右向左穿过可信代理链确定客户端 IP。生产配置不得使用空列表。
 - Admin BFF、Admin PostgreSQL 和 Redis 位于内部网络。
 - Cloud Internal Admin API 使用独立内部端口和私有网络策略。
 - Admin 数据库账号无权访问 Cloud 数据库，Cloud 数据库账号也不访问 Admin 数据库。

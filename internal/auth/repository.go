@@ -37,6 +37,7 @@ type sessionRecord struct {
 	Role                         rbac.Role
 	MFAMethod                    MFAMethod
 	MFAAuthenticatedAt           time.Time
+	TOTPAuthenticatedAt          *time.Time
 	CreatedAt                    time.Time
 	LastSeenAt                   time.Time
 	IdleExpiresAt                time.Time
@@ -218,9 +219,9 @@ func insertSession(ctx context.Context, tx pgx.Tx, session sessionRecord) error 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO admin_sessions (
 			id, admin_user_id, token_hmac, csrf_hmac, security_version, role,
-			mfa_method, mfa_authenticated_at, created_at, last_seen_at,
+			mfa_method, mfa_authenticated_at, totp_authenticated_at, created_at, last_seen_at,
 			idle_expires_at, absolute_expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)
 	`,
 		session.ID,
 		session.AdminID,
@@ -230,6 +231,7 @@ func insertSession(ctx context.Context, tx pgx.Tx, session sessionRecord) error 
 		session.Role,
 		session.MFAMethod,
 		session.MFAAuthenticatedAt,
+		session.TOTPAuthenticatedAt,
 		session.CreatedAt,
 		session.IdleExpiresAt,
 		session.AbsoluteExpiresAt,
@@ -268,6 +270,7 @@ func findSessionByTokenHMAC(ctx context.Context, postgres *pgxpool.Pool, tokenHM
 			s.role,
 			s.mfa_method,
 			s.mfa_authenticated_at,
+			s.totp_authenticated_at,
 			s.created_at,
 			s.last_seen_at,
 			s.idle_expires_at,
@@ -289,6 +292,7 @@ func findSessionByTokenHMAC(ctx context.Context, postgres *pgxpool.Pool, tokenHM
 		&session.Role,
 		&session.MFAMethod,
 		&session.MFAAuthenticatedAt,
+		&session.TOTPAuthenticatedAt,
 		&session.CreatedAt,
 		&session.LastSeenAt,
 		&session.IdleExpiresAt,
@@ -305,6 +309,7 @@ func findSessionByTokenHMAC(ctx context.Context, postgres *pgxpool.Pool, tokenHM
 		return sessionRecord{}, ErrUnavailable
 	}
 	session.MFAAuthenticatedAt = session.MFAAuthenticatedAt.UTC()
+	session.TOTPAuthenticatedAt = utcTimePointer(session.TOTPAuthenticatedAt)
 	session.CreatedAt = session.CreatedAt.UTC()
 	session.LastSeenAt = session.LastSeenAt.UTC()
 	session.IdleExpiresAt = session.IdleExpiresAt.UTC()
@@ -352,6 +357,7 @@ func lockSessionForStepUp(ctx context.Context, tx pgx.Tx, tokenHMAC []byte) (ste
 			s.role,
 			s.mfa_method,
 			s.mfa_authenticated_at,
+			s.totp_authenticated_at,
 			s.created_at,
 			s.last_seen_at,
 			s.idle_expires_at,
@@ -379,6 +385,7 @@ func lockSessionForStepUp(ctx context.Context, tx pgx.Tx, tokenHMAC []byte) (ste
 		&record.Session.Role,
 		&record.Session.MFAMethod,
 		&record.Session.MFAAuthenticatedAt,
+		&record.Session.TOTPAuthenticatedAt,
 		&record.Session.CreatedAt,
 		&record.Session.LastSeenAt,
 		&record.Session.IdleExpiresAt,
@@ -398,13 +405,15 @@ func lockSessionForStepUp(ctx context.Context, tx pgx.Tx, tokenHMAC []byte) (ste
 		}
 		return stepUpRecord{}, ErrUnavailable
 	}
+	record.Session.MFAAuthenticatedAt = record.Session.MFAAuthenticatedAt.UTC()
+	record.Session.TOTPAuthenticatedAt = utcTimePointer(record.Session.TOTPAuthenticatedAt)
 	return record, nil
 }
 
 func persistStepUp(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID, at time.Time) error {
 	command, err := tx.Exec(ctx, `
 		UPDATE admin_sessions
-		SET mfa_method = 'totp', mfa_authenticated_at = $2
+		SET totp_authenticated_at = $2
 		WHERE id = $1 AND revoked_at IS NULL
 	`, sessionID, at)
 	if err != nil {
@@ -431,6 +440,7 @@ func lockSessionByTokenHMAC(ctx context.Context, tx pgx.Tx, tokenHMAC []byte) (s
 			s.role,
 			s.mfa_method,
 			s.mfa_authenticated_at,
+			s.totp_authenticated_at,
 			s.created_at,
 			s.last_seen_at,
 			s.idle_expires_at,
@@ -453,6 +463,7 @@ func lockSessionByTokenHMAC(ctx context.Context, tx pgx.Tx, tokenHMAC []byte) (s
 		&session.Role,
 		&session.MFAMethod,
 		&session.MFAAuthenticatedAt,
+		&session.TOTPAuthenticatedAt,
 		&session.CreatedAt,
 		&session.LastSeenAt,
 		&session.IdleExpiresAt,
@@ -468,6 +479,8 @@ func lockSessionByTokenHMAC(ctx context.Context, tx pgx.Tx, tokenHMAC []byte) (s
 		}
 		return sessionRecord{}, ErrUnavailable
 	}
+	session.MFAAuthenticatedAt = session.MFAAuthenticatedAt.UTC()
+	session.TOTPAuthenticatedAt = utcTimePointer(session.TOTPAuthenticatedAt)
 	return session, nil
 }
 
@@ -484,4 +497,12 @@ func revokeSessionTx(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID, now ti
 		return ErrInvalidSession
 	}
 	return nil
+}
+
+func utcTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
 }

@@ -8,9 +8,7 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/audit"
@@ -23,8 +21,6 @@ import (
 
 const maximumAdminJSONBody = 64 << 10
 
-var httpRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-
 type HandlerService interface {
 	Invite(context.Context, Actor, InviteRequest) (InvitationResult, error)
 	PrepareActivation(context.Context, string) (ActivationPreparation, error)
@@ -36,9 +32,9 @@ type HandlerService interface {
 }
 
 type ActivationAttemptLimiter interface {
-	CheckActivationAttempts(context.Context, []byte, []byte) (time.Duration, error)
-	RecordActivationFailure(context.Context, []byte, []byte) (time.Duration, error)
-	ClearActivationFailures(context.Context, []byte) error
+	ReserveActivationAttempt(context.Context, []byte, []byte) (string, error)
+	ReleaseActivationAttempt(context.Context, string, []byte, []byte) error
+	CompleteActivationAttempt(context.Context, string, []byte, []byte) error
 }
 
 func NewHandler(service HandlerService) http.Handler {
@@ -123,13 +119,20 @@ func prepareActivationHTTP(service HandlerService, limiter ActivationAttemptLimi
 		}
 		subjectDigest := activationAttemptDigest(payload.Token)
 		meta := requestMetaFromRequest(request)
-		if err := checkActivationAttempts(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC); err != nil {
+		reservationID, err := reserveActivationAttempt(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC)
+		if err != nil {
 			writeAdminDomainError(response, err)
 			return
 		}
 		result, err := service.PrepareActivation(request.Context(), payload.Token)
 		if err != nil {
-			err = recordActivationFailure(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC, err)
+			if !isActivationCredentialFailure(err) {
+				err = releaseActivationAttempt(request.Context(), limiter, reservationID, subjectDigest, meta.SourceIPHMAC, err)
+			}
+			writeAdminDomainError(response, err)
+			return
+		}
+		if err := releaseActivationAttempt(request.Context(), limiter, reservationID, subjectDigest, meta.SourceIPHMAC, nil); err != nil {
 			writeAdminDomainError(response, err)
 			return
 		}
@@ -150,7 +153,8 @@ func activateHTTP(service HandlerService, limiter ActivationAttemptLimiter) http
 		}
 		subjectDigest := activationAttemptDigest(payload.Token)
 		meta := requestMetaFromRequest(request)
-		if err := checkActivationAttempts(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC); err != nil {
+		reservationID, err := reserveActivationAttempt(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC)
+		if err != nil {
 			payload.Password = ""
 			payload.TOTPCode = ""
 			payload.Token = ""
@@ -165,12 +169,17 @@ func activateHTTP(service HandlerService, limiter ActivationAttemptLimiter) http
 		payload.TOTPCode = ""
 		payload.Token = ""
 		if err != nil {
-			err = recordActivationFailure(request.Context(), limiter, subjectDigest, meta.SourceIPHMAC, err)
+			if !isActivationCredentialFailure(err) {
+				err = releaseActivationAttempt(request.Context(), limiter, reservationID, subjectDigest, meta.SourceIPHMAC, err)
+			}
 			writeAdminDomainError(response, err)
 			return
 		}
 		if limiter != nil {
-			_ = limiter.ClearActivationFailures(request.Context(), subjectDigest)
+			if err := limiter.CompleteActivationAttempt(request.Context(), reservationID, subjectDigest, meta.SourceIPHMAC); err != nil {
+				writeAdminDomainError(response, auth.ErrUnavailable)
+				return
+			}
 		}
 		writeAdminJSON(response, http.StatusOK, result)
 	}
@@ -296,10 +305,7 @@ func requestMetaFromRequest(request *http.Request) RequestMeta {
 			RequestID: meta.RequestID, SourceIPHMAC: append([]byte(nil), meta.SourceIPHMAC...), UserAgent: meta.UserAgent,
 		}
 	}
-	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
-	if !httpRequestIDPattern.MatchString(requestID) {
-		requestID = "req-" + uuid.NewString()
-	}
+	requestID := "req-" + uuid.NewString()
 	return RequestMeta{RequestID: requestID, UserAgent: request.UserAgent()}
 }
 
@@ -366,41 +372,42 @@ func activationAttemptDigest(rawToken string) []byte {
 	return append([]byte(nil), digest[:]...)
 }
 
-func checkActivationAttempts(
+func reserveActivationAttempt(
 	ctx context.Context,
 	limiter ActivationAttemptLimiter,
 	subjectDigest, sourceIPHMAC []byte,
-) error {
+) (string, error) {
 	if limiter == nil {
-		return nil
+		return "", nil
 	}
-	retryAfter, err := limiter.CheckActivationAttempts(ctx, subjectDigest, sourceIPHMAC)
+	reservationID, err := limiter.ReserveActivationAttempt(ctx, subjectDigest, sourceIPHMAC)
 	if err != nil {
-		return auth.ErrUnavailable
+		if errors.Is(err, auth.ErrRateLimited) {
+			return "", err
+		}
+		return "", auth.ErrUnavailable
 	}
-	if retryAfter > 0 {
-		return &auth.RateLimitError{RetryAfter: retryAfter}
-	}
-	return nil
+	return reservationID, nil
 }
 
-func recordActivationFailure(
+func releaseActivationAttempt(
 	ctx context.Context,
 	limiter ActivationAttemptLimiter,
+	reservationID string,
 	subjectDigest, sourceIPHMAC []byte,
 	domainErr error,
 ) error {
-	if limiter == nil || (!errors.Is(domainErr, ErrInvalidInvitation) && !errors.Is(domainErr, ErrInvalidActivation)) {
+	if limiter == nil {
 		return domainErr
 	}
-	retryAfter, err := limiter.RecordActivationFailure(ctx, subjectDigest, sourceIPHMAC)
-	if err != nil {
+	if err := limiter.ReleaseActivationAttempt(ctx, reservationID, subjectDigest, sourceIPHMAC); err != nil {
 		return auth.ErrUnavailable
 	}
-	if retryAfter > 0 {
-		return &auth.RateLimitError{RetryAfter: retryAfter}
-	}
 	return domainErr
+}
+
+func isActivationCredentialFailure(err error) bool {
+	return errors.Is(err, ErrInvalidInvitation) || errors.Is(err, ErrInvalidActivation)
 }
 
 func writeHTTPError(response http.ResponseWriter, status int, code, message string) {

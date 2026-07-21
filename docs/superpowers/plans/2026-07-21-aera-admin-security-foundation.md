@@ -864,10 +864,14 @@ git commit -m "feat: add administrator invitation lifecycle"
 - Create: `internal/auth/browser_test.go`
 - Create: `internal/auth/limiter.go`
 - Create: `internal/store/migrations/000003_session_mfa_method.sql`
+- Create: `internal/store/migrations/000004_session_totp_authenticated_at.sql`
 - Modify: `cmd/aera-admin/main.go`
 - Modify: `cmd/aera-admin/main_test.go`
 - Modify: `internal/admin/http.go`
 - Modify: `internal/admin/http_test.go`
+- Modify: `internal/config/config.go`
+- Modify: `internal/config/config_test.go`
+- Modify: `.env.example`
 - Modify: `Makefile`
 
 **Interfaces:**
@@ -890,11 +894,11 @@ func TestLoginRequiresTOTPBeforeSession(t *testing.T) {
 
 Unknown email, wrong password, wrong TOTP, expired challenge, replayed TOTP, and suspended account must return the same public `AUTH_INVALID_CREDENTIALS` where revealing the distinction would enumerate an account. Rate-limit responses use `RATE_LIMITED` and a bounded `Retry-After`.
 
-The Redis limiter uses only HMAC/SHA-256 subject digests and source-IP HMACs. Password success creates a challenge but does not clear the account failure counter; only completed MFA clears it, preventing password-assisted TOTP brute-force bypass.
+The Redis limiter uses only HMAC/SHA-256 subject digests and source-IP HMACs. One Lua operation atomically rejects a pre-existing account/session or IP lock and reserves an admitted attempt before password, TOTP, recovery-code, or activation validation. The reservation is a failure unless its exact identifier is released. Correct password and valid activation preparation release only their own reservation; completed MFA, step-up, and activation clear the account/session dimension while releasing only the current IP reservation, so historical IP failures are never cleared. Infrastructure failures release their reservation. Synchronized concurrency tests prove no more than the configured threshold enters password/TOTP validation, and a correct step-up code remains blocked behind an existing lock.
 
 - [x] **Step 3: Implement PostgreSQL-authoritative and Redis-live sessions**
 
-Creation writes a hashed session row and Redis live-session record; failure to write Redis revokes the PostgreSQL row and returns unavailable. Authentication requires Redis, verifies the token HMAC in constant time, checks idle/absolute expiry and security version, and updates `last_seen_at` with bounded write frequency. Every authenticated request refreshes the authoritative database idle deadline and Redis TTL to preserve a precise 30-minute inactivity window, capped by the 8-hour absolute deadline. There is no PostgreSQL fallback while Redis is unavailable. Migration `000003` records whether the session was established by TOTP or a recovery code.
+Creation writes a hashed session row and Redis live-session record; failure to write Redis revokes the PostgreSQL row and returns unavailable. Authentication requires Redis, verifies the token HMAC in constant time, checks idle/absolute expiry and security version, and updates `last_seen_at` with bounded write frequency. Every authenticated request refreshes the authoritative database idle deadline and Redis TTL to preserve a precise 30-minute inactivity window, capped by the 8-hour absolute deadline. There is no PostgreSQL fallback while Redis is unavailable. Migration `000003` records the immutable session-establishment method. Migration `000004` adds nullable `totp_authenticated_at`, backfills only TOTP-established sessions, leaves recovery-established sessions null, and lets step-up update recent-TOTP state without erasing recovery provenance.
 
 - [x] **Step 4: Test CSRF, Origin, cookie, and logout**
 
@@ -915,9 +919,9 @@ func TestMutationRequiresMatchingOriginAndCSRF(t *testing.T) {
 
 - [x] **Step 5: Implement step-up and recovery-code use**
 
-Step-up validates a fresh, non-replayed TOTP and updates only `mfa_authenticated_at`. A recovery code can complete login once, is atomically consumed, revokes all older sessions, and emits a high-severity audit event.
+Step-up validates a fresh, non-replayed TOTP and updates only `totp_authenticated_at`; `mfa_method` and the establishment `mfa_authenticated_at` remain immutable. A recovery code can complete login once, is atomically consumed, revokes all older sessions, and emits a high-severity audit event. The 10-minute high-risk guard reads `totp_authenticated_at`, so a recovery-established session can step up without changing its provenance.
 
-The browser middleware derives a deterministic CSRF token from the HttpOnly session token so `/me` can safely reissue it after reload, requires the exact configured origin for every unsafe method, and records sanitized `401`, `403`, `429`, and activation-failure outcomes without credential material. High-risk administrator mutations require a TOTP-authenticated session no older than 10 minutes.
+The browser middleware derives a deterministic CSRF token from the HttpOnly session token so `/me` can safely reissue it after reload, requires the exact configured origin for every unsafe method, and records sanitized `401`, `403`, `429`, and activation-failure outcomes without credential material. Request IDs are always generated server-side and caller `X-Request-ID` values are ignored. Credential-like User-Agent values are dropped before audit. Denial responses are buffered until the append-only audit succeeds; an append failure replaces the denial with `503 AUTH_UNAVAILABLE`. Client IP accepts `X-Forwarded-For` only from the strict `AERA_ADMIN_TRUSTED_PROXY_CIDRS` allowlist and safely walks the chain from the trusted peer. Production HTTPS termination requires a non-empty allowlist. High-risk administrator mutations require `totp_authenticated_at` no older than 10 minutes.
 
 - [x] **Step 6: Verify complete auth flow**
 

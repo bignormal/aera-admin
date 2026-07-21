@@ -143,6 +143,7 @@ func buildAdminAPI(settings config.Config, postgres *pgxpool.Pool, redisClient *
 	}
 	browserSecurity, err := adminauth.NewBrowserSecurity(adminauth.BrowserSecurityConfig{
 		Service: authService, PublicURL: settings.PublicURL, SourceIPHMACKey: settings.SessionHMACKey,
+		TrustedProxyCIDRs: settings.TrustedProxyCIDRs,
 	})
 	if err != nil {
 		return nil, err

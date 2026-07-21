@@ -102,7 +102,7 @@ func TestRequireRecentTOTPRejectsRecoveryAndStaleAuthentication(t *testing.T) {
 		},
 		"stale": {
 			AdminID: "00000000-0000-4000-8000-000000000001", Role: rbac.SuperAdmin,
-			MFAMethod: MFAMethodTOTP, MFAAuthenticatedAt: now.Add(-11 * time.Minute),
+			MFAMethod: MFAMethodTOTP, MFAAuthenticatedAt: now.Add(-20 * time.Minute), TOTPAuthenticatedAt: timePointer(now.Add(-11 * time.Minute)),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestRequireRecentTOTPRejectsRecoveryAndStaleAuthentication(t *testing.T) {
 	}
 	fresh := Principal{
 		AdminID: "00000000-0000-4000-8000-000000000001", Role: rbac.SuperAdmin,
-		MFAMethod: MFAMethodTOTP, MFAAuthenticatedAt: now.Add(-10 * time.Minute),
+		MFAMethod: MFAMethodRecovery, MFAAuthenticatedAt: now.Add(-20 * time.Minute), TOTPAuthenticatedAt: timePointer(now.Add(-10 * time.Minute)),
 	}
 	response := httptest.NewRecorder()
 	RequireRecentTOTP(func() time.Time { return now }, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
@@ -128,6 +128,10 @@ func TestRequireRecentTOTPRejectsRecoveryAndStaleAuthentication(t *testing.T) {
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("fresh status = %d, want 204", response.Code)
 	}
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
 }
 
 func assertAPIError(t *testing.T, response *httptest.ResponseRecorder, code string) {

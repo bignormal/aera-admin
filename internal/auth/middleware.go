@@ -36,8 +36,12 @@ func RequireRecentTOTP(clock func() time.Time, next http.Handler) http.Handler {
 			return
 		}
 		now := clock().UTC()
-		mfaAt := principal.MFAAuthenticatedAt.UTC()
-		if principal.MFAMethod != MFAMethodTOTP || mfaAt.IsZero() || mfaAt.After(now) || now.Sub(mfaAt) > recentTOTPLifetime {
+		if principal.TOTPAuthenticatedAt == nil {
+			writeAuthorizationError(response, http.StatusForbidden, "STEP_UP_REQUIRED", "此操作需要近期完成 TOTP 二次验证")
+			return
+		}
+		totpAt := principal.TOTPAuthenticatedAt.UTC()
+		if totpAt.IsZero() || totpAt.After(now) || now.Sub(totpAt) > recentTOTPLifetime {
 			writeAuthorizationError(response, http.StatusForbidden, "STEP_UP_REQUIRED", "此操作需要近期完成 TOTP 二次验证")
 			return
 		}

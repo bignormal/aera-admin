@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,7 +43,8 @@ func TestLoginRequiresTOTPBeforeSessionAndRejectsReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteLogin() error = %v", err)
 	}
-	if result.RawSessionToken == "" || result.CSRFToken == "" || result.Principal.AdminID != fixture.adminID.String() || result.Principal.MFAMethod != MFAMethodTOTP {
+	if result.RawSessionToken == "" || result.CSRFToken == "" || result.Principal.AdminID != fixture.adminID.String() ||
+		result.Principal.MFAMethod != MFAMethodTOTP || result.Principal.TOTPAuthenticatedAt == nil || !result.Principal.TOTPAuthenticatedAt.Equal(fixture.now) {
 		t.Fatalf("CompleteLogin() = %+v", result)
 	}
 	if err := fixture.postgres.QueryRow(ctx, `SELECT count(*) FROM admin_sessions WHERE revoked_at IS NULL`).Scan(&sessionCount); err != nil {
@@ -89,6 +94,8 @@ func TestBeginLoginUsesGenericErrorsWithoutAccountEnumeration(t *testing.T) {
 func TestLoginRateLimitBlocksCorrectPasswordAfterProgressiveFailures(t *testing.T) {
 	fixture := newAuthFixture(t)
 	ctx := context.Background()
+	var validations atomic.Int64
+	fixture.service.beforePasswordValidation = func() { validations.Add(1) }
 	for attempt := 1; attempt <= 2; attempt++ {
 		if _, err := fixture.service.BeginLogin(ctx, fixture.email, "incorrect horse battery staple", fixture.meta("req-rate-fail")); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("BeginLogin() attempt %d error = %v, want ErrInvalidCredentials", attempt, err)
@@ -99,8 +106,127 @@ func TestLoginRateLimitBlocksCorrectPasswordAfterProgressiveFailures(t *testing.
 	if !errors.As(err, &limited) || limited.RetryAfter <= 0 || limited.RetryAfter > 15*time.Minute {
 		t.Fatalf("third BeginLogin() error = %#v, want bounded RateLimitError", err)
 	}
+	validations.Store(0)
 	if _, err := fixture.service.BeginLogin(ctx, fixture.email, fixture.password, fixture.meta("req-rate-correct")); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("rate-limited correct BeginLogin() error = %v, want ErrRateLimited", err)
+	}
+	if got := validations.Load(); got != 0 {
+		t.Fatalf("password validations behind pre-existing lock = %d, want 0", got)
+	}
+}
+
+func TestConcurrentPasswordAttemptsCannotPassAdmissionBeyondPolicy(t *testing.T) {
+	fixture := newAuthFixture(t)
+	const workers = 20
+	entered := make(chan struct{}, workers)
+	release := make(chan struct{})
+	fixture.service.beforePasswordValidation = func() {
+		entered <- struct{}{}
+		<-release
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, workers)
+	var wait sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			<-start
+			_, err := fixture.service.BeginLogin(
+				context.Background(),
+				fixture.email,
+				"incorrect horse battery staple",
+				fixture.meta(fmt.Sprintf("req-concurrent-password-%02d", worker)),
+			)
+			results <- err
+		}(worker)
+	}
+	close(start)
+	for enteredCount := 0; enteredCount < int(accountAttemptPolicy.firstThreshold); enteredCount++ {
+		select {
+		case <-entered:
+		case <-time.After(3 * time.Second):
+			close(release)
+			t.Fatal("password attempts did not reach the admission threshold")
+		}
+	}
+	select {
+	case <-entered:
+		close(release)
+		t.Fatal("password validation exceeded the atomic admission threshold")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	wait.Wait()
+	close(results)
+	for err := range results {
+		if !errors.Is(err, ErrInvalidCredentials) && !errors.Is(err, ErrRateLimited) {
+			t.Fatalf("BeginLogin() error = %v", err)
+		}
+	}
+}
+
+func TestConcurrentTOTPAttemptsCannotPassAdmissionBeyondPolicy(t *testing.T) {
+	fixture := newAuthFixture(t)
+	challenge, err := fixture.service.BeginLogin(context.Background(), fixture.email, fixture.password, fixture.meta("req-concurrent-totp-password"))
+	if err != nil {
+		t.Fatalf("BeginLogin() error = %v", err)
+	}
+	const workers = 20
+	entered := make(chan struct{}, workers)
+	release := make(chan struct{})
+	var validationCount atomic.Int64
+	fixture.service.beforeTOTPValidation = func() {
+		validationCount.Add(1)
+		entered <- struct{}{}
+		<-release
+	}
+	wrongCode := "000000"
+	if wrongCode == fixture.totp.Code(fixture.totpSecret, fixture.now) {
+		wrongCode = "111111"
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, workers)
+	var wait sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			<-start
+			_, completeErr := fixture.service.CompleteLogin(context.Background(), CompleteLoginRequest{
+				ChallengeID: challenge.ID, TOTPCode: wrongCode,
+				Meta: fixture.meta(fmt.Sprintf("req-concurrent-totp-%02d", worker)),
+			})
+			results <- completeErr
+		}(worker)
+	}
+	close(start)
+	for enteredCount := 0; enteredCount < int(accountAttemptPolicy.firstThreshold); enteredCount++ {
+		select {
+		case <-entered:
+		case <-time.After(3 * time.Second):
+			close(release)
+			t.Fatal("TOTP attempts did not reach the admission threshold")
+		}
+	}
+	select {
+	case <-entered:
+		close(release)
+		t.Fatal("TOTP validation exceeded the atomic admission threshold")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	wait.Wait()
+	close(results)
+	for err := range results {
+		if !errors.Is(err, ErrInvalidCredentials) && !errors.Is(err, ErrRateLimited) {
+			t.Fatalf("CompleteLogin() error = %v", err)
+		}
+	}
+	if got := validationCount.Load(); got != accountAttemptPolicy.firstThreshold {
+		t.Fatalf("TOTP validations = %d, want %d", got, accountAttemptPolicy.firstThreshold)
 	}
 }
 
@@ -142,7 +268,7 @@ func TestSessionAuthenticationRequiresRedisAndPostgreSQLState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate() error = %v", err)
 	}
-	if authenticated.Principal != login.Principal || authenticated.CSRFToken != login.CSRFToken {
+	if !reflect.DeepEqual(authenticated.Principal, login.Principal) || authenticated.CSRFToken != login.CSRFToken {
 		t.Fatalf("Authenticate() = %+v, login = %+v", authenticated, login)
 	}
 	tokenHMAC, ok := fixture.service.tokens.sessionTokenHMAC(login.RawSessionToken)
@@ -268,7 +394,7 @@ func TestRecoveryCodeLoginIsOneTimeAndRevokesOlderSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteLogin(recovery) error = %v", err)
 	}
-	if recovered.Principal.MFAMethod != MFAMethodRecovery || recovered.RawSessionToken == "" {
+	if recovered.Principal.MFAMethod != MFAMethodRecovery || recovered.Principal.TOTPAuthenticatedAt != nil || recovered.RawSessionToken == "" {
 		t.Fatalf("recovery login = %+v", recovered)
 	}
 	var olderRevokedAt *time.Time
@@ -306,6 +432,11 @@ func TestStepUpRequiresFreshNonReplayedTOTPWithoutExtendingSession(t *testing.T)
 	if err != nil {
 		t.Fatalf("CompleteLogin(recovery) error = %v", err)
 	}
+	establishedAt := recovered.Principal.MFAAuthenticatedAt
+	fixture.advance(30 * time.Second)
+	if _, err := fixture.service.Authenticate(context.Background(), recovered.RawSessionToken); err != nil {
+		t.Fatalf("Authenticate() before step-up error = %v", err)
+	}
 	var idleBefore, absoluteBefore time.Time
 	if err := fixture.postgres.QueryRow(context.Background(), `
 		SELECT idle_expires_at, absolute_expires_at FROM admin_sessions WHERE id = $1
@@ -317,8 +448,22 @@ func TestStepUpRequiresFreshNonReplayedTOTPWithoutExtendingSession(t *testing.T)
 	if err != nil {
 		t.Fatalf("StepUp() error = %v", err)
 	}
-	if steppedUp.Principal.MFAMethod != MFAMethodTOTP || !steppedUp.Principal.MFAAuthenticatedAt.Equal(fixture.now) {
+	if steppedUp.Principal.MFAMethod != MFAMethodRecovery || !steppedUp.Principal.MFAAuthenticatedAt.Equal(establishedAt) ||
+		steppedUp.Principal.TOTPAuthenticatedAt == nil || !steppedUp.Principal.TOTPAuthenticatedAt.Equal(fixture.now) {
 		t.Fatalf("StepUp() = %+v", steppedUp)
+	}
+	var storedMethod MFAMethod
+	var storedMFAAt time.Time
+	var storedTOTPAt *time.Time
+	if err := fixture.postgres.QueryRow(context.Background(), `
+		SELECT mfa_method, mfa_authenticated_at, totp_authenticated_at
+		FROM admin_sessions
+		WHERE id = $1
+	`, recovered.Principal.SessionID).Scan(&storedMethod, &storedMFAAt, &storedTOTPAt); err != nil {
+		t.Fatalf("read session MFA provenance after step-up: %v", err)
+	}
+	if storedMethod != MFAMethodRecovery || !storedMFAAt.Equal(establishedAt) || storedTOTPAt == nil || !storedTOTPAt.Equal(fixture.now) {
+		t.Fatalf("stored MFA provenance = method:%q mfa:%s totp:%v", storedMethod, storedMFAAt, storedTOTPAt)
 	}
 	var idleAfter, absoluteAfter time.Time
 	if err := fixture.postgres.QueryRow(context.Background(), `
@@ -331,6 +476,57 @@ func TestStepUpRequiresFreshNonReplayedTOTPWithoutExtendingSession(t *testing.T)
 	}
 	if _, err := fixture.service.StepUp(context.Background(), recovered.RawSessionToken, code, fixture.meta("req-stepup-replay")); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("replayed StepUp() error = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+func TestStepUpLockRejectsCorrectTOTPBeforeValidation(t *testing.T) {
+	fixture := newAuthFixture(t)
+	fixture.login(t)
+	fixture.advance(30 * time.Second)
+	challenge, err := fixture.service.BeginLogin(context.Background(), fixture.email, fixture.password, fixture.meta("req-stepup-lock-recovery-password"))
+	if err != nil {
+		t.Fatalf("BeginLogin(recovery) error = %v", err)
+	}
+	recovered, err := fixture.service.CompleteLogin(context.Background(), CompleteLoginRequest{
+		ChallengeID: challenge.ID, RecoveryCode: fixture.recoveryCode, Meta: fixture.meta("req-stepup-lock-recovery"),
+	})
+	if err != nil {
+		t.Fatalf("CompleteLogin(recovery) error = %v", err)
+	}
+	wrongCode := "000000"
+	if wrongCode == fixture.totp.Code(fixture.totpSecret, fixture.now) {
+		wrongCode = "111111"
+	}
+	for attempt := 1; attempt <= int(accountAttemptPolicy.firstThreshold); attempt++ {
+		_, err := fixture.service.StepUp(context.Background(), recovered.RawSessionToken, wrongCode, fixture.meta("req-stepup-lock-wrong"))
+		if attempt < int(accountAttemptPolicy.firstThreshold) && !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("StepUp(wrong) attempt %d error = %v, want ErrInvalidCredentials", attempt, err)
+		}
+		if attempt == int(accountAttemptPolicy.firstThreshold) && !errors.Is(err, ErrRateLimited) {
+			t.Fatalf("StepUp(wrong) attempt %d error = %v, want ErrRateLimited", attempt, err)
+		}
+	}
+
+	var validations atomic.Int64
+	fixture.service.beforeTOTPValidation = func() { validations.Add(1) }
+	correctCode := fixture.totp.Code(fixture.totpSecret, fixture.now)
+	if _, err := fixture.service.StepUp(context.Background(), recovered.RawSessionToken, correctCode, fixture.meta("req-stepup-lock-correct")); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("StepUp(correct while locked) error = %v, want ErrRateLimited", err)
+	}
+	if got := validations.Load(); got != 0 {
+		t.Fatalf("TOTP validations behind pre-existing step-up lock = %d, want 0", got)
+	}
+	var method MFAMethod
+	var totpAuthenticatedAt *time.Time
+	if err := fixture.postgres.QueryRow(context.Background(), `
+		SELECT mfa_method, totp_authenticated_at
+		FROM admin_sessions
+		WHERE id = $1
+	`, recovered.Principal.SessionID).Scan(&method, &totpAuthenticatedAt); err != nil {
+		t.Fatalf("read blocked step-up session: %v", err)
+	}
+	if method != MFAMethodRecovery || totpAuthenticatedAt != nil {
+		t.Fatalf("blocked correct TOTP changed MFA state to method:%q totp:%v", method, totpAuthenticatedAt)
 	}
 }
 

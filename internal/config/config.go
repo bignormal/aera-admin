@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -27,6 +28,7 @@ type Config struct {
 	PublicURL              string
 	DatabaseURL            string
 	RedisAddr              string
+	TrustedProxyCIDRs      []netip.Prefix
 	IdentityEncryptionKeys KeyRing
 	IdentityLookupKeys     KeyRing
 	TOTPEncryptionKeys     KeyRing
@@ -70,6 +72,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if _, _, err := net.SplitHostPort(redisAddr); err != nil {
 		return Config{}, errors.New("AERA_ADMIN_REDIS_ADDR must contain a host and port")
 	}
+	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(lookup, environment)
+	if err != nil {
+		return Config{}, err
+	}
 	identityEncryption, err := parseKeyRing(lookup, "AERA_ADMIN_IDENTITY_ENCRYPTION_KEYS")
 	if err != nil {
 		return Config{}, err
@@ -92,10 +98,43 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	return Config{
 		Environment: environment, ListenAddr: listenAddr, PublicURL: publicURL,
-		DatabaseURL: databaseURL, RedisAddr: redisAddr,
+		DatabaseURL: databaseURL, RedisAddr: redisAddr, TrustedProxyCIDRs: trustedProxyCIDRs,
 		IdentityEncryptionKeys: identityEncryption, IdentityLookupKeys: identityLookup,
 		TOTPEncryptionKeys: totpEncryption, SessionHMACKey: sessionKey, CSRFHMACKey: csrfKey,
 	}, nil
+}
+
+func parseTrustedProxyCIDRs(lookup LookupEnv, environment string) ([]netip.Prefix, error) {
+	raw, err := required(lookup, "AERA_ADMIN_TRUSTED_PROXY_CIDRS")
+	if err != nil {
+		return nil, err
+	}
+	var encoded []string
+	decoder := json.NewDecoder(bytes.NewBufferString(raw))
+	if err := decoder.Decode(&encoded); err != nil || ensureJSONEnd(decoder) != nil {
+		return nil, errors.New("AERA_ADMIN_TRUSTED_PROXY_CIDRS must contain one JSON array of CIDRs")
+	}
+	if encoded == nil || len(encoded) > 64 {
+		return nil, errors.New("AERA_ADMIN_TRUSTED_PROXY_CIDRS must contain a bounded JSON array of CIDRs")
+	}
+	if environment == "production" && len(encoded) == 0 {
+		return nil, errors.New("AERA_ADMIN_TRUSTED_PROXY_CIDRS must name the HTTPS termination proxies in production")
+	}
+	prefixes := make([]netip.Prefix, 0, len(encoded))
+	seen := make(map[netip.Prefix]struct{}, len(encoded))
+	for _, rawPrefix := range encoded {
+		prefix, parseErr := netip.ParsePrefix(rawPrefix)
+		if parseErr != nil || prefix != prefix.Masked() || prefix.Addr().Zone() != "" {
+			return nil, errors.New("AERA_ADMIN_TRUSTED_PROXY_CIDRS contains an invalid or non-canonical CIDR")
+		}
+		prefix = prefix.Masked()
+		if _, duplicate := seen[prefix]; duplicate {
+			return nil, errors.New("AERA_ADMIN_TRUSTED_PROXY_CIDRS contains a duplicate CIDR")
+		}
+		seen[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes, nil
 }
 
 func required(lookup LookupEnv, key string) (string, error) {

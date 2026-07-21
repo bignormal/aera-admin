@@ -113,8 +113,8 @@ func prepareRecord(record Record) (Record, error) {
 		return Record{}, ErrInvalidRecord
 	}
 	prepared.UserAgent = sanitizeUserAgent(record.UserAgent)
-	if record.UserAgent != "" && prepared.UserAgent == "" {
-		return Record{}, ErrInvalidRecord
+	if containsSensitiveText(prepared.UserAgent) {
+		prepared.UserAgent = ""
 	}
 	if containsSensitiveText(prepared.Note) || containsSensitiveText(prepared.TicketReference) || containsSensitiveText(prepared.UserAgent) {
 		return Record{}, ErrSensitiveText

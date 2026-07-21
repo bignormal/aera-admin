@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,7 +38,8 @@ func TestInvitationHTTPRequiresPermissionAndNeverEchoesRawIdentity(t *testing.T)
 	if bytes.Contains(response.Body.Bytes(), []byte("Admin@Example.com")) || bytes.Contains(response.Body.Bytes(), []byte("admin@example.com")) {
 		t.Fatalf("invitation response leaked raw identity: %s", response.Body.String())
 	}
-	if fake.inviteCalls != 1 || fake.lastInvite.Email != "Admin@Example.com" || fake.lastInvite.Reason.Meta.RequestID != "req-http-test" {
+	if fake.inviteCalls != 1 || fake.lastInvite.Email != "Admin@Example.com" || fake.lastInvite.Reason.Meta.RequestID == "req-http-test" ||
+		!strings.HasPrefix(fake.lastInvite.Reason.Meta.RequestID, "req-") {
 		t.Fatalf("captured invitation = %+v, calls = %d", fake.lastInvite, fake.inviteCalls)
 	}
 	assertNoStoreJSON(t, response)
@@ -111,6 +113,7 @@ func TestAdministratorMutationRequiresRecentTOTP(t *testing.T) {
 	handler := NewHandler(fake)
 	stale := principal(uuid.New(), rbac.SuperAdmin)
 	stale.MFAAuthenticatedAt = time.Now().Add(-11 * time.Minute)
+	stale.TOTPAuthenticatedAt = timePointer(time.Now().Add(-11 * time.Minute))
 	response := serveAdminHTTP(
 		handler,
 		http.MethodPost,
@@ -123,9 +126,13 @@ func TestAdministratorMutationRequiresRecentTOTP(t *testing.T) {
 	}
 }
 
+func timePointer(value time.Time) *time.Time {
+	return &value
+}
+
 func TestActivationHTTPAppliesDigestBasedRateLimitBeforeService(t *testing.T) {
 	fake := &fakeHandlerService{}
-	limiter := &fakeActivationLimiter{checkRetry: 2 * time.Second}
+	limiter := &fakeActivationLimiter{reserveErr: &auth.RateLimitError{RetryAfter: 2 * time.Second}}
 	handler := NewHandlerWithActivationLimiter(fake, limiter)
 	response := serveAdminHTTP(handler, http.MethodPost, "/auth/activation/prepare", `{"token":"raw-invitation-token"}`, nil)
 	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "2" || fake.prepareToken != "" {
@@ -133,6 +140,61 @@ func TestActivationHTTPAppliesDigestBasedRateLimitBeforeService(t *testing.T) {
 	}
 	if len(limiter.subjectDigest) != 32 || bytes.Contains(limiter.subjectDigest, []byte("raw-invitation-token")) {
 		t.Fatalf("activation limiter received non-digest subject: %x", limiter.subjectDigest)
+	}
+}
+
+func TestActivationReservationsReleaseValidPrepareAndCompleteActivation(t *testing.T) {
+	for name, path := range map[string]string{
+		"prepare":  "/auth/activation/prepare",
+		"activate": "/auth/activate",
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeHandlerService{}
+			limiter := &fakeActivationLimiter{reservationID: "reservation-1"}
+			handler := NewHandlerWithActivationLimiter(fake, limiter)
+			body := `{"token":"raw-invitation-token"}`
+			if path == "/auth/activate" {
+				body = `{"token":"raw-invitation-token","password":"correct horse battery staple","totp_code":"123456"}`
+			}
+
+			response := serveAdminHTTP(handler, http.MethodPost, path, body, nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("response = %d %q", response.Code, response.Body.String())
+			}
+			if limiter.reserveCalls != 1 {
+				t.Fatalf("reserve calls = %d, want 1", limiter.reserveCalls)
+			}
+			if path == "/auth/activation/prepare" && (limiter.releaseCalls != 1 || limiter.completeCalls != 0) {
+				t.Fatalf("prepare finish calls = release:%d complete:%d", limiter.releaseCalls, limiter.completeCalls)
+			}
+			if path == "/auth/activate" && (limiter.releaseCalls != 0 || limiter.completeCalls != 1) {
+				t.Fatalf("activation finish calls = release:%d complete:%d", limiter.releaseCalls, limiter.completeCalls)
+			}
+		})
+	}
+}
+
+func TestActivationInfrastructureFailureReleasesReservationButCredentialFailureDoesNot(t *testing.T) {
+	for name, domainErr := range map[string]error{
+		"infrastructure": auth.ErrUnavailable,
+		"credential":     ErrInvalidInvitation,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeHandlerService{err: domainErr}
+			limiter := &fakeActivationLimiter{reservationID: "reservation-1"}
+			handler := NewHandlerWithActivationLimiter(fake, limiter)
+			_ = serveAdminHTTP(handler, http.MethodPost, "/auth/activation/prepare", `{"token":"raw-invitation-token"}`, nil)
+			if limiter.reserveCalls != 1 {
+				t.Fatalf("reserve calls = %d, want 1", limiter.reserveCalls)
+			}
+			wantRelease := 0
+			if errors.Is(domainErr, auth.ErrUnavailable) {
+				wantRelease = 1
+			}
+			if limiter.releaseCalls != wantRelease {
+				t.Fatalf("release calls = %d, want %d", limiter.releaseCalls, wantRelease)
+			}
+		})
 	}
 }
 
@@ -194,9 +256,10 @@ func serveAdminHTTP(handler http.Handler, method, path, body string, authPrincip
 }
 
 func principal(id uuid.UUID, role rbac.Role) *auth.Principal {
+	now := time.Now()
 	return &auth.Principal{
 		AdminID: id.String(), SessionID: uuid.NewString(), Role: role, SecurityVersion: 1,
-		MFAMethod: auth.MFAMethodTOTP, MFAAuthenticatedAt: time.Now(),
+		MFAMethod: auth.MFAMethodTOTP, MFAAuthenticatedAt: now, TOTPAuthenticatedAt: &now,
 	}
 }
 
@@ -214,22 +277,27 @@ func assertNoStoreJSON(t *testing.T, response *httptest.ResponseRecorder) {
 var _ HandlerService = (*fakeHandlerService)(nil)
 
 type fakeActivationLimiter struct {
-	checkRetry    time.Duration
-	failureRetry  time.Duration
+	reservationID string
+	reserveErr    error
+	reserveCalls  int
+	releaseCalls  int
+	completeCalls int
 	subjectDigest []byte
 }
 
-func (fake *fakeActivationLimiter) CheckActivationAttempts(_ context.Context, subjectDigest, _ []byte) (time.Duration, error) {
+func (fake *fakeActivationLimiter) ReserveActivationAttempt(_ context.Context, subjectDigest, _ []byte) (string, error) {
+	fake.reserveCalls++
 	fake.subjectDigest = append([]byte(nil), subjectDigest...)
-	return fake.checkRetry, nil
+	return fake.reservationID, fake.reserveErr
 }
 
-func (fake *fakeActivationLimiter) RecordActivationFailure(_ context.Context, subjectDigest, _ []byte) (time.Duration, error) {
-	fake.subjectDigest = append([]byte(nil), subjectDigest...)
-	return fake.failureRetry, nil
+func (fake *fakeActivationLimiter) ReleaseActivationAttempt(context.Context, string, []byte, []byte) error {
+	fake.releaseCalls++
+	return nil
 }
 
-func (fake *fakeActivationLimiter) ClearActivationFailures(context.Context, []byte) error {
+func (fake *fakeActivationLimiter) CompleteActivationAttempt(context.Context, string, []byte, []byte) error {
+	fake.completeCalls++
 	return nil
 }
 

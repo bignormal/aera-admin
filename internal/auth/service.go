@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -38,19 +39,21 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	repository        *repository
-	redis             *redis.Client
-	redisPrefix       string
-	passwords         *secure.PasswordHasher
-	identities        *secure.IdentityCodec
-	totpSecrets       *secure.SecretCodec
-	totp              secure.TOTP
-	audit             *audit.Service
-	tokens            *tokenCodec
-	limiter           *attemptLimiter
-	liveSessionWriter func(context.Context, []byte, uuid.UUID, time.Duration) error
-	dummyPasswordHash string
-	clock             func() time.Time
+	repository               *repository
+	redis                    *redis.Client
+	redisPrefix              string
+	passwords                *secure.PasswordHasher
+	identities               *secure.IdentityCodec
+	totpSecrets              *secure.SecretCodec
+	totp                     secure.TOTP
+	audit                    *audit.Service
+	tokens                   *tokenCodec
+	limiter                  *attemptLimiter
+	liveSessionWriter        func(context.Context, []byte, uuid.UUID, time.Duration) error
+	dummyPasswordHash        string
+	clock                    func() time.Time
+	beforePasswordValidation func()
+	beforeTOTPValidation     func()
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -97,13 +100,19 @@ func (service *Service) BeginLogin(ctx context.Context, email, password string, 
 	if len(candidates) > 0 {
 		accountKey = append([]byte(nil), candidates[0].HMAC...)
 	}
-	retryAfter, err := service.limiter.check(ctx, "login", accountKey, meta.SourceIPHMAC)
+	reservation, err := service.limiter.admit(ctx, "login", accountKey, meta.SourceIPHMAC)
 	if err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			return LoginChallenge{}, service.auditAdmissionDenied(ctx, "admin_login_failed", nil, meta, err)
+		}
 		return LoginChallenge{}, err
 	}
-	if retryAfter > 0 {
-		return LoginChallenge{}, &RateLimitError{RetryAfter: retryAfter}
-	}
+	reservationHandled := false
+	defer func() {
+		if !reservationHandled {
+			service.releaseAttemptBestEffort(reservation)
+		}
+	}()
 	administrator, found, err := findLoginAdministratorByLookup(ctx, service.repository.postgres, candidates)
 	if err != nil {
 		return LoginChallenge{}, err
@@ -112,13 +121,20 @@ func (service *Service) BeginLogin(ctx context.Context, email, password string, 
 	if found {
 		hash = administrator.PasswordHash
 	}
+	if service.beforePasswordValidation != nil {
+		service.beforePasswordValidation()
+	}
 	passwordOK, _, verifyErr := service.passwords.Verify(password, hash)
 	if verifyErr != nil {
 		return LoginChallenge{}, ErrUnavailable
 	}
 	if len(candidates) == 0 || !found || !passwordOK || administrator.Status != "active" ||
 		!administrator.Role.Valid() || administrator.SecurityVersion <= 0 || administrator.TOTPSecret.KeyID == "" {
-		return LoginChallenge{}, service.loginFailure(ctx, cloneUUIDIfSet(administrator.ID), accountKey, meta)
+		failureErr := service.loginFailure(ctx, cloneUUIDIfSet(administrator.ID), meta, reservation)
+		if errors.Is(failureErr, ErrInvalidCredentials) || errors.Is(failureErr, ErrRateLimited) {
+			reservationHandled = true
+		}
+		return LoginChallenge{}, failureErr
 	}
 	rawChallenge, _, err := secure.NewOpaqueToken(32)
 	if err != nil {
@@ -132,6 +148,10 @@ func (service *Service) BeginLogin(ctx context.Context, email, password string, 
 	}, loginChallengeLifetime); err != nil {
 		return LoginChallenge{}, err
 	}
+	if err := service.limiter.release(ctx, reservation); err != nil {
+		return LoginChallenge{}, err
+	}
+	reservationHandled = true
 	return LoginChallenge{ID: rawChallenge, ExpiresAt: expiresAt}, nil
 }
 
@@ -140,32 +160,43 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 		(request.TOTPCode == "") == (request.RecoveryCode == "") {
 		return LoginResult{}, ErrInvalidRequest
 	}
-	retryAfter, err := service.limiter.check(ctx, "login", nil, request.Meta.SourceIPHMAC)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	if retryAfter > 0 {
-		return LoginResult{}, &RateLimitError{RetryAfter: retryAfter}
-	}
 	state, challengeDigest, err := getChallenge(ctx, service.redis, service.redisPrefix, request.ChallengeID, service.tokens)
+	var accountKey []byte
+	if err == nil {
+		accountKey = state.AccountKey
+	}
+	reservation, admissionErr := service.limiter.admit(ctx, "login", accountKey, request.Meta.SourceIPHMAC)
+	if admissionErr != nil {
+		if errors.Is(admissionErr, ErrRateLimited) {
+			return LoginResult{}, service.auditAdmissionDenied(ctx, "admin_login_failed", nil, request.Meta, admissionErr)
+		}
+		return LoginResult{}, admissionErr
+	}
+	reservationHandled := false
+	defer func() {
+		if !reservationHandled {
+			service.releaseAttemptBestEffort(reservation)
+		}
+	}()
+	credentialFailure := func(failureErr error) (LoginResult, error) {
+		if errors.Is(failureErr, ErrInvalidCredentials) || errors.Is(failureErr, ErrRateLimited) {
+			reservationHandled = true
+		}
+		return LoginResult{}, failureErr
+	}
 	if err != nil {
 		if errors.Is(err, ErrInvalidCredentials) {
-			return LoginResult{}, service.loginFailure(ctx, nil, nil, request.Meta)
+			return credentialFailure(service.loginFailure(ctx, nil, request.Meta, reservation))
 		}
 		return LoginResult{}, err
 	}
-	retryAfter, err = service.limiter.check(ctx, "login", state.AccountKey, request.Meta.SourceIPHMAC)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	if retryAfter > 0 {
-		return LoginResult{}, &RateLimitError{RetryAfter: retryAfter}
-	}
-	now := service.now()
 	administratorID, parseErr := uuid.Parse(state.AdministratorID)
-	if parseErr != nil || administratorID == uuid.Nil || !state.ExpiresAt.After(now) || !sourceMatches(state.SourceIPHMAC, request.Meta.SourceIPHMAC) {
+	if parseErr != nil || administratorID == uuid.Nil || !sourceMatches(state.SourceIPHMAC, request.Meta.SourceIPHMAC) {
 		deleteChallenge(ctx, service.redis, service.redisPrefix, challengeDigest)
-		return LoginResult{}, service.loginFailure(ctx, cloneUUIDIfSet(administratorID), state.AccountKey, request.Meta)
+		return credentialFailure(service.loginFailure(ctx, cloneUUIDIfSet(administratorID), request.Meta, reservation))
+	}
+	if request.TOTPCode != "" && service.beforeTOTPValidation != nil {
+		service.beforeTOTPValidation()
 	}
 	material, err := service.tokens.newSessionMaterial()
 	if err != nil {
@@ -177,24 +208,26 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	administrator, err := lockLoginAdministrator(ctx, tx, administratorID)
-	if err != nil || administrator.Status != "active" || !administrator.Role.Valid() || administrator.SecurityVersion <= 0 {
-		return LoginResult{}, service.loginFailureTx(ctx, tx, cloneUUIDIfSet(administrator.ID), state.AccountKey, request.Meta)
+	now := service.now()
+	if err != nil || !state.ExpiresAt.After(now) || administrator.Status != "active" || !administrator.Role.Valid() || administrator.SecurityVersion <= 0 {
+		return credentialFailure(service.loginFailureTx(ctx, tx, cloneUUIDIfSet(administrator.ID), request.Meta, reservation))
 	}
 	mfaMethod := MFAMethodTOTP
+	var totpAuthenticatedAt *time.Time
 	eventType := "admin_login_succeeded"
 	reasonCode := ""
 	var revokedTokenHMACs [][]byte
 	if request.RecoveryCode != "" {
 		recoveryDigest, valid := opaqueTokenDigest(request.RecoveryCode)
 		if !valid {
-			return LoginResult{}, service.loginFailureTx(ctx, tx, &administratorID, state.AccountKey, request.Meta)
+			return credentialFailure(service.loginFailureTx(ctx, tx, &administratorID, request.Meta, reservation))
 		}
 		consumed, err := consumeRecoveryCode(ctx, tx, administrator.ID, recoveryDigest, now)
 		if err != nil {
 			return LoginResult{}, err
 		}
 		if !consumed {
-			return LoginResult{}, service.loginFailureTx(ctx, tx, &administratorID, state.AccountKey, request.Meta)
+			return credentialFailure(service.loginFailureTx(ctx, tx, &administratorID, request.Meta, reservation))
 		}
 		revokedTokenHMACs, err = revokeAdministratorSessionsTx(ctx, tx, administrator.ID, now)
 		if err != nil {
@@ -211,16 +244,17 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 		acceptedStep, valid := service.totp.Validate(secret, request.TOTPCode, now, administrator.LastAcceptedStep)
 		clear(secret)
 		if !valid {
-			return LoginResult{}, service.loginFailureTx(ctx, tx, &administratorID, state.AccountKey, request.Meta)
+			return credentialFailure(service.loginFailureTx(ctx, tx, &administratorID, request.Meta, reservation))
 		}
 		if err := acceptTOTPStep(ctx, tx, administrator.ID, administrator.LastAcceptedStep, acceptedStep, now); err != nil {
-			return LoginResult{}, service.loginFailureTx(ctx, tx, &administratorID, state.AccountKey, request.Meta)
+			return credentialFailure(service.loginFailureTx(ctx, tx, &administratorID, request.Meta, reservation))
 		}
+		totpAuthenticatedAt = cloneTime(now)
 	}
 	session := sessionRecord{
 		ID: material.ID, AdminID: administrator.ID, TokenHMAC: material.TokenHMAC, CSRFHMAC: material.CSRFHMAC,
 		SecurityVersion: administrator.SecurityVersion, Role: administrator.Role, MFAMethod: mfaMethod,
-		MFAAuthenticatedAt: now, CreatedAt: now, LastSeenAt: now,
+		MFAAuthenticatedAt: now, TOTPAuthenticatedAt: totpAuthenticatedAt, CreatedAt: now, LastSeenAt: now,
 		IdleExpiresAt: now.Add(sessionIdleLifetime), AbsoluteExpiresAt: now.Add(sessionAbsoluteLifetime),
 	}
 	if err := insertSession(ctx, tx, session); err != nil {
@@ -233,7 +267,7 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 		SourceIPHMAC: request.Meta.SourceIPHMAC, UserAgent: request.Meta.UserAgent,
 		AfterState: map[string]string{"session_status": "active", "mfa_status": string(mfaMethod)},
 	}); err != nil {
-		return LoginResult{}, ErrInvalidRequest
+		return LoginResult{}, ErrUnavailable
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return LoginResult{}, ErrUnavailable
@@ -247,13 +281,15 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 		return LoginResult{}, ErrUnavailable
 	}
 	deleteChallenge(ctx, service.redis, service.redisPrefix, challengeDigest)
-	if err := service.limiter.success(ctx, "login", state.AccountKey); err != nil {
+	if err := service.limiter.complete(ctx, reservation); err != nil {
 		_ = revokeSession(context.Background(), service.repository.postgres, material.ID, now)
 		return LoginResult{}, err
 	}
+	reservationHandled = true
 	principal := Principal{
 		AdminID: administrator.ID.String(), SessionID: material.ID.String(), Role: administrator.Role,
-		SecurityVersion: administrator.SecurityVersion, MFAAuthenticatedAt: now, MFAMethod: mfaMethod,
+		SecurityVersion: administrator.SecurityVersion, MFAAuthenticatedAt: now,
+		TOTPAuthenticatedAt: cloneOptionalTime(totpAuthenticatedAt), MFAMethod: mfaMethod,
 	}
 	return LoginResult{
 		RawSessionToken: material.RawToken, CSRFToken: material.CSRFToken, Principal: principal, DisplayName: administrator.DisplayName,
@@ -326,7 +362,7 @@ func (service *Service) Authenticate(ctx context.Context, rawSessionToken string
 	principal := Principal{
 		AdminID: session.AdminID.String(), SessionID: session.ID.String(), Role: session.Role,
 		SecurityVersion: session.SecurityVersion, MFAAuthenticatedAt: session.MFAAuthenticatedAt,
-		MFAMethod: session.MFAMethod,
+		TOTPAuthenticatedAt: cloneOptionalTime(session.TOTPAuthenticatedAt), MFAMethod: session.MFAMethod,
 	}
 	return AuthenticatedSession{Principal: principal, CSRFToken: csrfToken, DisplayName: session.DisplayName, AbsoluteExpiresAt: session.AbsoluteExpiresAt}, nil
 }
@@ -335,41 +371,74 @@ func (service *Service) StepUp(ctx context.Context, rawSessionToken, totpCode st
 	if service == nil || !validRequestMeta(meta) {
 		return AuthenticatedSession{}, ErrInvalidRequest
 	}
+	tokenHMAC, tokenOK := service.tokens.sessionTokenHMAC(rawSessionToken)
+	var subject []byte
+	if tokenOK {
+		subject = keyedDigest(service.tokens.sessionKey, "aera-admin.step-up-subject.v1", base64.RawURLEncoding.EncodeToString(tokenHMAC))
+	}
+	reservation, err := service.limiter.admit(ctx, "login", subject, meta.SourceIPHMAC)
+	if err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			return AuthenticatedSession{}, service.auditAdmissionDenied(ctx, "admin_step_up_failed", nil, meta, err)
+		}
+		return AuthenticatedSession{}, fmt.Errorf("step-up admission: %w", err)
+	}
+	reservationHandled := false
+	defer func() {
+		if !reservationHandled {
+			service.releaseAttemptBestEffort(reservation)
+		}
+	}()
 	authenticated, err := service.Authenticate(ctx, rawSessionToken)
 	if err != nil {
-		return AuthenticatedSession{}, err
+		if errors.Is(err, ErrInvalidSession) {
+			reservationHandled = true
+		}
+		return AuthenticatedSession{}, fmt.Errorf("step-up authenticate: %w", err)
 	}
-	tokenHMAC, ok := service.tokens.sessionTokenHMAC(rawSessionToken)
-	if !ok {
+	if !tokenOK {
+		reservationHandled = true
 		return AuthenticatedSession{}, ErrInvalidSession
 	}
 	tx, err := service.repository.begin(ctx)
 	if err != nil {
-		return AuthenticatedSession{}, err
+		return AuthenticatedSession{}, fmt.Errorf("step-up begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	record, err := lockSessionForStepUp(ctx, tx, tokenHMAC)
 	if err != nil {
-		return AuthenticatedSession{}, err
+		return AuthenticatedSession{}, fmt.Errorf("step-up lock session: %w", err)
 	}
 	now := service.now()
 	if !validSessionRecord(record.Session, tokenHMAC, now) || record.Session.ID.String() != authenticated.Principal.SessionID {
+		reservationHandled = true
 		return AuthenticatedSession{}, ErrInvalidSession
 	}
 	secret, err := service.totpSecrets.Open(record.TOTPSecret)
 	if err != nil {
-		return AuthenticatedSession{}, ErrUnavailable
+		return AuthenticatedSession{}, fmt.Errorf("step-up open secret: %w", ErrUnavailable)
+	}
+	if service.beforeTOTPValidation != nil {
+		service.beforeTOTPValidation()
 	}
 	acceptedStep, valid := service.totp.Validate(secret, totpCode, now, record.LastAcceptedStep)
 	clear(secret)
 	if !valid {
-		return AuthenticatedSession{}, service.stepUpFailureTx(ctx, tx, &record.Session.AdminID, meta)
+		failureErr := service.stepUpFailureTx(ctx, tx, &record.Session.AdminID, meta, reservation)
+		if errors.Is(failureErr, ErrInvalidCredentials) || errors.Is(failureErr, ErrRateLimited) {
+			reservationHandled = true
+		}
+		return AuthenticatedSession{}, failureErr
 	}
 	if err := acceptTOTPStep(ctx, tx, record.Session.AdminID, record.LastAcceptedStep, acceptedStep, now); err != nil {
-		return AuthenticatedSession{}, service.stepUpFailureTx(ctx, tx, &record.Session.AdminID, meta)
+		failureErr := service.stepUpFailureTx(ctx, tx, &record.Session.AdminID, meta, reservation)
+		if errors.Is(failureErr, ErrInvalidCredentials) || errors.Is(failureErr, ErrRateLimited) {
+			reservationHandled = true
+		}
+		return AuthenticatedSession{}, failureErr
 	}
 	if err := persistStepUp(ctx, tx, record.Session.ID, now); err != nil {
-		return AuthenticatedSession{}, err
+		return AuthenticatedSession{}, fmt.Errorf("step-up persist: %w", err)
 	}
 	if _, err := service.audit.AppendTx(ctx, tx, audit.Record{
 		ActorAdminID: &record.Session.AdminID, ActorRole: record.Session.Role,
@@ -377,15 +446,18 @@ func (service *Service) StepUp(ctx context.Context, rawSessionToken, totpCode st
 		Outcome: audit.OutcomeSuccess, RequestID: meta.RequestID,
 		SourceIPHMAC: meta.SourceIPHMAC, UserAgent: meta.UserAgent,
 		BeforeState: map[string]string{"mfa_status": string(record.Session.MFAMethod)},
-		AfterState:  map[string]string{"mfa_status": string(MFAMethodTOTP)},
+		AfterState:  map[string]string{"mfa_status": string(record.Session.MFAMethod)},
 	}); err != nil {
-		return AuthenticatedSession{}, ErrUnavailable
+		return AuthenticatedSession{}, fmt.Errorf("step-up audit: %w", ErrUnavailable)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return AuthenticatedSession{}, ErrUnavailable
+		return AuthenticatedSession{}, fmt.Errorf("step-up commit: %w", ErrUnavailable)
 	}
-	authenticated.Principal.MFAMethod = MFAMethodTOTP
-	authenticated.Principal.MFAAuthenticatedAt = now
+	if err := service.limiter.complete(ctx, reservation); err != nil {
+		return AuthenticatedSession{}, fmt.Errorf("step-up complete reservation: %w", err)
+	}
+	reservationHandled = true
+	authenticated.Principal.TOTPAuthenticatedAt = cloneTime(now)
 	return authenticated, nil
 }
 
@@ -427,34 +499,52 @@ func (service *Service) Logout(ctx context.Context, rawSessionToken string, meta
 	return nil
 }
 
-func (service *Service) CheckActivationAttempts(ctx context.Context, subjectDigest, sourceIPHMAC []byte) (time.Duration, error) {
+func (service *Service) ReserveActivationAttempt(ctx context.Context, subjectDigest, sourceIPHMAC []byte) (string, error) {
 	if service == nil {
-		return 0, ErrUnavailable
+		return "", ErrUnavailable
 	}
-	return service.limiter.check(ctx, "activation", subjectDigest, sourceIPHMAC)
+	reservation, err := service.limiter.admit(ctx, "activation", subjectDigest, sourceIPHMAC)
+	if err != nil {
+		return "", err
+	}
+	return reservation.ID, nil
 }
 
-func (service *Service) RecordActivationFailure(ctx context.Context, subjectDigest, sourceIPHMAC []byte) (time.Duration, error) {
-	if service == nil {
-		return 0, ErrUnavailable
-	}
-	return service.limiter.failure(ctx, "activation", subjectDigest, sourceIPHMAC)
-}
-
-func (service *Service) ClearActivationFailures(ctx context.Context, subjectDigest []byte) error {
+func (service *Service) ReleaseActivationAttempt(
+	ctx context.Context,
+	reservationID string,
+	subjectDigest, sourceIPHMAC []byte,
+) error {
 	if service == nil {
 		return ErrUnavailable
 	}
-	return service.limiter.success(ctx, "activation", subjectDigest)
+	return service.limiter.release(ctx, attemptReservation{
+		ID: reservationID, Scope: "activation",
+		Subject: append([]byte(nil), subjectDigest...), SourceIP: append([]byte(nil), sourceIPHMAC...),
+	})
 }
 
-func (service *Service) auditHTTPDenial(ctx context.Context, path string, status int, principal Principal, meta RequestMeta) {
+func (service *Service) CompleteActivationAttempt(
+	ctx context.Context,
+	reservationID string,
+	subjectDigest, sourceIPHMAC []byte,
+) error {
+	if service == nil {
+		return ErrUnavailable
+	}
+	return service.limiter.complete(ctx, attemptReservation{
+		ID: reservationID, Scope: "activation",
+		Subject: append([]byte(nil), subjectDigest...), SourceIP: append([]byte(nil), sourceIPHMAC...),
+	})
+}
+
+func (service *Service) auditHTTPDenial(ctx context.Context, path string, status int, principal Principal, meta RequestMeta) error {
 	if service == nil || !validRequestMeta(meta) {
-		return
+		return ErrUnavailable
 	}
 	if (path == "/auth/login" || path == "/auth/totp/verify") &&
 		(status == http.StatusUnauthorized || status == http.StatusTooManyRequests) {
-		return
+		return nil
 	}
 	record := audit.Record{
 		EventType: "admin_authorization_denied", ObjectType: "admin_api_request",
@@ -483,7 +573,10 @@ func (service *Service) auditHTTPDenial(ctx context.Context, path string, status
 			record.ActorRole = principal.Role
 		}
 	}
-	_, _ = service.audit.Append(ctx, record)
+	if _, err := service.audit.Append(ctx, record); err != nil {
+		return ErrUnavailable
+	}
+	return nil
 }
 
 func validSessionRecord(session sessionRecord, tokenHMAC []byte, now time.Time) bool {
@@ -494,11 +587,12 @@ func validSessionRecord(session sessionRecord, tokenHMAC []byte, now time.Time) 
 		session.MFAMethod.Valid() && now.Before(session.IdleExpiresAt) && now.Before(session.AbsoluteExpiresAt)
 }
 
-func (service *Service) loginFailure(ctx context.Context, administratorID *uuid.UUID, accountKey []byte, meta RequestMeta) error {
-	retryAfter, limitErr := service.limiter.failure(ctx, "login", accountKey, meta.SourceIPHMAC)
-	if limitErr != nil {
-		return limitErr
-	}
+func (service *Service) loginFailure(
+	ctx context.Context,
+	administratorID *uuid.UUID,
+	meta RequestMeta,
+	reservation attemptReservation,
+) error {
 	record := audit.Record{
 		EventType: "admin_login_failed", ObjectType: "admin_authentication", ObjectID: administratorID,
 		Outcome: audit.OutcomeFailure, ErrorCode: "AUTH_INVALID_CREDENTIALS",
@@ -507,23 +601,16 @@ func (service *Service) loginFailure(ctx context.Context, administratorID *uuid.
 	if _, err := service.audit.Append(ctx, record); err != nil {
 		return ErrUnavailable
 	}
-	if retryAfter > 0 {
-		return &RateLimitError{RetryAfter: retryAfter}
-	}
-	return ErrInvalidCredentials
+	return reservationFailure(reservation)
 }
 
 func (service *Service) loginFailureTx(
 	ctx context.Context,
 	tx pgx.Tx,
 	administratorID *uuid.UUID,
-	accountKey []byte,
 	meta RequestMeta,
+	reservation attemptReservation,
 ) error {
-	retryAfter, limitErr := service.limiter.failure(ctx, "login", accountKey, meta.SourceIPHMAC)
-	if limitErr != nil {
-		return limitErr
-	}
 	if _, err := service.audit.AppendTx(ctx, tx, audit.Record{
 		EventType: "admin_login_failed", ObjectType: "admin_authentication", ObjectID: administratorID,
 		Outcome: audit.OutcomeFailure, ErrorCode: "AUTH_INVALID_CREDENTIALS",
@@ -534,17 +621,16 @@ func (service *Service) loginFailureTx(
 	if err := tx.Commit(ctx); err != nil {
 		return ErrUnavailable
 	}
-	if retryAfter > 0 {
-		return &RateLimitError{RetryAfter: retryAfter}
-	}
-	return ErrInvalidCredentials
+	return reservationFailure(reservation)
 }
 
-func (service *Service) stepUpFailureTx(ctx context.Context, tx pgx.Tx, administratorID *uuid.UUID, meta RequestMeta) error {
-	retryAfter, limitErr := service.limiter.failure(ctx, "login", nil, meta.SourceIPHMAC)
-	if limitErr != nil {
-		return limitErr
-	}
+func (service *Service) stepUpFailureTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	administratorID *uuid.UUID,
+	meta RequestMeta,
+	reservation attemptReservation,
+) error {
 	if _, err := service.audit.AppendTx(ctx, tx, audit.Record{
 		EventType: "admin_step_up_failed", ObjectType: "admin_authentication", ObjectID: administratorID,
 		Outcome: audit.OutcomeFailure, ErrorCode: "AUTH_INVALID_CREDENTIALS",
@@ -555,8 +641,35 @@ func (service *Service) stepUpFailureTx(ctx context.Context, tx pgx.Tx, administ
 	if err := tx.Commit(ctx); err != nil {
 		return ErrUnavailable
 	}
-	if retryAfter > 0 {
-		return &RateLimitError{RetryAfter: retryAfter}
+	return reservationFailure(reservation)
+}
+
+func (service *Service) auditAdmissionDenied(
+	ctx context.Context,
+	eventType string,
+	administratorID *uuid.UUID,
+	meta RequestMeta,
+	domainErr error,
+) error {
+	if _, err := service.audit.Append(ctx, audit.Record{
+		EventType: eventType, ObjectType: "admin_authentication", ObjectID: administratorID,
+		Outcome: audit.OutcomeDenied, ErrorCode: "RATE_LIMITED",
+		RequestID: meta.RequestID, SourceIPHMAC: meta.SourceIPHMAC, UserAgent: meta.UserAgent,
+	}); err != nil {
+		return ErrUnavailable
+	}
+	return domainErr
+}
+
+func (service *Service) releaseAttemptBestEffort(reservation attemptReservation) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = service.limiter.release(ctx, reservation)
+}
+
+func reservationFailure(reservation attemptReservation) error {
+	if reservation.RetryAfter > 0 {
+		return &RateLimitError{RetryAfter: reservation.RetryAfter}
 	}
 	return ErrInvalidCredentials
 }
@@ -575,6 +688,18 @@ func cloneUUIDIfSet(value uuid.UUID) *uuid.UUID {
 	}
 	cloned := value
 	return &cloned
+}
+
+func cloneTime(value time.Time) *time.Time {
+	cloned := value
+	return &cloned
+}
+
+func cloneOptionalTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	return cloneTime(*value)
 }
 
 func opaqueTokenDigest(raw string) ([]byte, bool) {

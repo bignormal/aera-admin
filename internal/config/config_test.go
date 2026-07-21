@@ -37,6 +37,42 @@ func TestLoadRejectsNonHTTPSProductionURL(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresExplicitTrustedProxyCIDRsForProduction(t *testing.T) {
+	values := validEnvironment()
+	values["AERA_ADMIN_ENVIRONMENT"] = "production"
+	values["AERA_ADMIN_TRUSTED_PROXY_CIDRS"] = `[]`
+	if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), "AERA_ADMIN_TRUSTED_PROXY_CIDRS") {
+		t.Fatalf("Load() error = %v, want production trusted-proxy error", err)
+	}
+
+	values["AERA_ADMIN_TRUSTED_PROXY_CIDRS"] = `["10.0.0.0/8","2001:db8::/32"]`
+	loaded, err := Load(mapLookup(values))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(loaded.TrustedProxyCIDRs) != 2 {
+		t.Fatalf("trusted proxy CIDRs = %v", loaded.TrustedProxyCIDRs)
+	}
+}
+
+func TestLoadRejectsMalformedOrNonCanonicalTrustedProxyCIDRs(t *testing.T) {
+	for _, raw := range []string{
+		`["not-a-cidr"]`,
+		`["10.0.0.1/8"]`,
+		`["10.0.0.0/8","10.0.0.0/8"]`,
+		`{"cidrs":["10.0.0.0/8"]}`,
+		`null`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			values := validEnvironment()
+			values["AERA_ADMIN_TRUSTED_PROXY_CIDRS"] = raw
+			if _, err := Load(mapLookup(values)); err == nil || !strings.Contains(err.Error(), "AERA_ADMIN_TRUSTED_PROXY_CIDRS") {
+				t.Fatalf("Load() error = %v, want trusted-proxy validation error", err)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsPublicURLWithPathQueryOrCredentials(t *testing.T) {
 	for _, raw := range []string{
 		"https://admin.example.test/control",
@@ -98,6 +134,7 @@ func validEnvironment() map[string]string {
 		"AERA_ADMIN_PUBLIC_URL":               "https://admin.example.test",
 		"AERA_ADMIN_DATABASE_URL":             "postgres://aera_admin:password@127.0.0.1:5432/aera_admin?sslmode=disable",
 		"AERA_ADMIN_REDIS_ADDR":               "127.0.0.1:6379",
+		"AERA_ADMIN_TRUSTED_PROXY_CIDRS":      `[]`,
 		"AERA_ADMIN_IDENTITY_ENCRYPTION_KEYS": keyRingJSON("v1", encodedKey(1)),
 		"AERA_ADMIN_IDENTITY_LOOKUP_KEYS":     keyRingJSON("v1", encodedKey(2)),
 		"AERA_ADMIN_TOTP_ENCRYPTION_KEYS":     keyRingJSON("v1", encodedKey(3)),
