@@ -28,6 +28,7 @@ type HandlerService interface {
 	List(context.Context, Actor) ([]Administrator, error)
 	ChangeRole(context.Context, Actor, uuid.UUID, rbac.Role, ActionReason) error
 	Suspend(context.Context, Actor, uuid.UUID, ActionReason) error
+	RevokeSessions(context.Context, Actor, uuid.UUID, ActionReason) error
 	ResetTOTP(context.Context, Actor, uuid.UUID, ActionReason) (InvitationResult, error)
 }
 
@@ -53,6 +54,7 @@ func newHandler(service HandlerService, limiter ActivationAttemptLimiter) http.H
 	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/invitations", inviteAdministratorHTTP(service))
 	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Put("/admin-users/{adminID}/role", changeAdministratorRoleHTTP(service))
 	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/{adminID}/suspend", suspendAdministratorHTTP(service))
+	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/{adminID}/sessions/revoke", revokeAdministratorSessionsHTTP(service))
 	router.With(requirePermission(rbac.ManageAdministrators), requireRecentTOTP).Post("/admin-users/{adminID}/totp/reset", resetAdministratorTOTPHTTP(service))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Cache-Control", "no-store")
@@ -241,6 +243,26 @@ func suspendAdministratorHTTP(service HandlerService) http.HandlerFunc {
 			return
 		}
 		if err := service.Suspend(request.Context(), actor, targetID, payload.reason(requestMetaFromRequest(request))); err != nil {
+			writeAdminDomainError(response, err)
+			return
+		}
+		writeAdminJSON(response, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+func revokeAdministratorSessionsHTTP(service HandlerService) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		actor, targetID, ok := actorAndTargetFromRequest(request)
+		if !ok {
+			writeHTTPError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效")
+			return
+		}
+		var payload reasonPayload
+		if err := decodeAdminJSON(response, request, &payload); err != nil {
+			writeHTTPError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效")
+			return
+		}
+		if err := service.RevokeSessions(request.Context(), actor, targetID, payload.reason(requestMetaFromRequest(request))); err != nil {
 			writeAdminDomainError(response, err)
 			return
 		}

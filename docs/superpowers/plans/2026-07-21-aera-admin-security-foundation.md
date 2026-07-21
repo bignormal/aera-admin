@@ -957,7 +957,7 @@ git commit -m "feat: add mandatory TOTP administrator sessions"
 - Consumes the Admin Browser API from Tasks 7-8.
 - Produces a permission-filtered navigation and route guards based on `/api/v1/me`.
 
-- [ ] **Step 1: Write login behavior tests**
+- [x] **Step 1: Write login behavior tests**
 
 ```tsx
 it('does not persist credentials and advances to TOTP', async () => {
@@ -972,7 +972,7 @@ it('does not persist credentials and advances to TOTP', async () => {
 });
 ```
 
-- [ ] **Step 2: Implement typed no-store API client**
+- [x] **Step 2: Implement typed no-store API client**
 
 ```ts
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -989,11 +989,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 The client must not log request bodies and must clear password/TOTP fields after every attempt.
 
-- [ ] **Step 3: Implement login and activation views**
+- [x] **Step 3: Implement login and activation views**
 
 Login is a two-step password/TOTP card matching the approved RuoYi/Soybean density. Activation shows the provisioning QR, requires one successful TOTP, then displays recovery codes exactly once with a confirmation that the operator stored them.
 
-- [ ] **Step 4: Test and implement role-filtered Admin shell**
+- [x] **Step 4: Test and implement role-filtered Admin shell**
 
 ```tsx
 it('does not render administrator management for support', () => {
@@ -1004,11 +1004,11 @@ it('does not render administrator management for support', () => {
 
 Route loaders must also reject navigation; backend `403` remains authoritative.
 
-- [ ] **Step 5: Implement Administrators and Roles pages**
+- [x] **Step 5: Implement Administrators and Roles pages**
 
 The administrator table contains masked internal identity, display name, role, status, MFA state, last login, and actions. Role assignment uses the six fixed roles. The Roles page is read-only and reproduces the approved matrix.
 
-- [ ] **Step 6: Write OpenAPI and verify UI**
+- [x] **Step 6: Write OpenAPI and verify UI**
 
 Run: `cd web && pnpm lint && pnpm test --run && pnpm build`
 
@@ -1018,7 +1018,7 @@ Run: `go test ./...`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add web api/openapi/admin.yaml internal/webui/assets.go internal/webui/assets_development.go internal/webui/assets_release.go internal/webui/fallback

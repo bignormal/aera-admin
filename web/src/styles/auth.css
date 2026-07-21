@@ -1,0 +1,191 @@
+.auth-page {
+  display: grid;
+  min-width: 960px;
+  min-height: 100vh;
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 520px);
+  align-items: center;
+  gap: 80px;
+  padding: 64px clamp(56px, 9vw, 150px);
+  background:
+    radial-gradient(circle at 16% 16%, rgb(22 119 255 / 14%), transparent 34%),
+    linear-gradient(135deg, #071225 0%, #0d1c37 47%, #f4f7fb 47.1%, #f4f7fb 100%);
+}
+
+.auth-page-centered {
+  display: flex;
+  min-width: 760px;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 15% 10%, rgb(22 119 255 / 12%), transparent 34%),
+    #eef3f9;
+}
+
+.auth-intro {
+  max-width: 560px;
+  color: #fff;
+}
+
+.auth-intro h1.ant-typography {
+  margin: 20px 0 10px;
+  color: #fff;
+  font-size: clamp(36px, 4vw, 54px);
+  letter-spacing: -0.035em;
+}
+
+.auth-intro .ant-typography {
+  max-width: 510px;
+  color: #afbdd2;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.auth-brand-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 15px;
+  color: #fff;
+  background: linear-gradient(145deg, #2f8cff, #625df5);
+  box-shadow: 0 14px 36px rgb(22 119 255 / 35%);
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.auth-security-points {
+  display: grid;
+  gap: 14px;
+  margin-top: 34px;
+  color: #d9e5f7;
+}
+
+.auth-security-points span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-security-points .anticon {
+  color: #67adff;
+}
+
+.auth-card,
+.activation-card {
+  width: 100%;
+  border: 1px solid rgb(16 24 40 / 7%);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgb(16 24 40 / 14%);
+}
+
+.auth-card .ant-card-body {
+  padding: 38px;
+}
+
+.auth-card-heading h2.ant-typography {
+  margin: 8px 0 4px;
+  font-size: 26px;
+}
+
+.auth-kicker {
+  color: #1677ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.auth-alert {
+  margin: 20px 0;
+}
+
+.auth-secondary-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.auth-footer-note {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #eef1f5;
+  color: #7a8699;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.activation-card {
+  max-width: 920px;
+}
+
+.activation-card .ant-card-body {
+  padding: 38px 42px;
+}
+
+.activation-grid {
+  display: grid;
+  grid-template-columns: 270px 1fr;
+  gap: 38px;
+  margin-top: 30px;
+}
+
+.totp-setup {
+  padding: 24px;
+  border: 1px solid #e6ebf2;
+  border-radius: 10px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.totp-qr {
+  display: inline-flex;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.totp-setup .ant-typography {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.recovery-card {
+  max-width: 700px;
+  text-align: center;
+}
+
+.activation-success-icon {
+  color: #25a473;
+  font-size: 44px;
+}
+
+.recovery-code-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 28px 0;
+  padding: 20px;
+  border: 1px solid #dfe6ef;
+  border-radius: 9px;
+  background: #f6f8fb;
+}
+
+.recovery-code-grid code {
+  padding: 8px;
+  border-radius: 5px;
+  color: #24324a;
+  background: #fff;
+  font-size: 14px;
+}
+
+.activation-confirmation {
+  width: 100%;
+}
+
+@media (max-width: 1080px) {
+  .auth-page {
+    gap: 40px;
+    padding: 48px;
+  }
+}

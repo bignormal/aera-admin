@@ -126,6 +126,24 @@ func TestAdministratorMutationRequiresRecentTOTP(t *testing.T) {
 	}
 }
 
+func TestRevokeAdministratorSessionsHTTPRequiresManagementPermission(t *testing.T) {
+	fake := &fakeHandlerService{}
+	handler := NewHandler(fake)
+	targetID := uuid.New()
+	body := `{"reason_code":"suspected_compromise","ticket_reference":"SEC-42","note":"approved session revocation"}`
+
+	denied := serveAdminHTTP(handler, http.MethodPost, "/admin-users/"+targetID.String()+"/sessions/revoke", body, principal(uuid.New(), rbac.Support))
+	if denied.Code != http.StatusForbidden || fake.revokeCalls != 0 {
+		t.Fatalf("support revoke response/calls = %d/%d", denied.Code, fake.revokeCalls)
+	}
+
+	response := serveAdminHTTP(handler, http.MethodPost, "/admin-users/"+targetID.String()+"/sessions/revoke", body, principal(uuid.New(), rbac.SuperAdmin))
+	if response.Code != http.StatusOK || fake.revokeCalls != 1 || !strings.Contains(response.Body.String(), `"status":"ok"`) {
+		t.Fatalf("session revoke response/calls = %d/%d %q", response.Code, fake.revokeCalls, response.Body.String())
+	}
+	assertNoStoreJSON(t, response)
+}
+
 func timePointer(value time.Time) *time.Time {
 	return &value
 }
@@ -205,6 +223,7 @@ type fakeHandlerService struct {
 	administrators []Administrator
 	err            error
 	inviteCalls    int
+	revokeCalls    int
 	lastInvite     InviteRequest
 	prepareToken   string
 	lastActivation ActivateRequest
@@ -235,6 +254,11 @@ func (fake *fakeHandlerService) ChangeRole(context.Context, Actor, uuid.UUID, rb
 }
 
 func (fake *fakeHandlerService) Suspend(context.Context, Actor, uuid.UUID, ActionReason) error {
+	return fake.err
+}
+
+func (fake *fakeHandlerService) RevokeSessions(context.Context, Actor, uuid.UUID, ActionReason) error {
+	fake.revokeCalls++
 	return fake.err
 }
 

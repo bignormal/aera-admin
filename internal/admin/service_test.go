@@ -227,6 +227,47 @@ func TestSuspendMasksListAndRevokesAdministratorSessions(t *testing.T) {
 	}
 }
 
+func TestRevokeSessionsAdvancesSecurityVersionAndIsIdempotent(t *testing.T) {
+	fixture := newAdminFixture(t)
+	ctx := context.Background()
+	first := fixture.bootstrapAndActivate(t, "first@example.com", "第一管理员", "correct horse battery staple")
+	second := fixture.bootstrapAndActivate(t, "second@example.com", "第二管理员", "second correct horse battery")
+	fixture.insertSession(t, second.AdminID, rbac.SuperAdmin)
+	firstActor := actor(first.AdminID, rbac.SuperAdmin, "req-revoke-sessions")
+
+	if err := fixture.service.RevokeSessions(ctx, firstActor, second.AdminID, actionReason("req-revoke-sessions")); err != nil {
+		t.Fatalf("RevokeSessions() error = %v", err)
+	}
+	var securityVersion int64
+	var revokedAt *time.Time
+	if err := fixture.postgres.QueryRow(ctx, `SELECT security_version FROM admin_users WHERE id = $1`, second.AdminID).Scan(&securityVersion); err != nil {
+		t.Fatalf("read security version: %v", err)
+	}
+	if err := fixture.postgres.QueryRow(ctx, `SELECT revoked_at FROM admin_sessions WHERE admin_user_id = $1`, second.AdminID).Scan(&revokedAt); err != nil {
+		t.Fatalf("read revoked session: %v", err)
+	}
+	if securityVersion != 2 || revokedAt == nil {
+		t.Fatalf("revocation state = version:%d revoked:%v", securityVersion, revokedAt)
+	}
+
+	if err := fixture.service.RevokeSessions(ctx, firstActor, second.AdminID, actionReason("req-revoke-sessions-retry")); err != nil {
+		t.Fatalf("RevokeSessions() retry error = %v", err)
+	}
+	var eventCount int
+	if err := fixture.postgres.QueryRow(ctx, `SELECT count(*) FROM admin_audit_events WHERE event_type = 'admin_sessions_revoked' AND object_id = $1`, second.AdminID).Scan(&eventCount); err != nil {
+		t.Fatalf("count session revocation audits: %v", err)
+	}
+	if err := fixture.postgres.QueryRow(ctx, `SELECT security_version FROM admin_users WHERE id = $1`, second.AdminID).Scan(&securityVersion); err != nil {
+		t.Fatalf("read security version after retry: %v", err)
+	}
+	if securityVersion != 2 || eventCount != 1 {
+		t.Fatalf("idempotent retry state = version:%d audits:%d", securityVersion, eventCount)
+	}
+	if err := fixture.service.RevokeSessions(ctx, firstActor, first.AdminID, actionReason("req-revoke-self")); !errors.Is(err, ErrSelfManagement) {
+		t.Fatalf("RevokeSessions(self) error = %v", err)
+	}
+}
+
 func TestTOTPResetRevokesSessionsAndUsesPasswordProtectedRebinding(t *testing.T) {
 	fixture := newAdminFixture(t)
 	ctx := context.Background()

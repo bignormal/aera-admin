@@ -550,6 +550,38 @@ func (service *Service) Suspend(ctx context.Context, actor Actor, targetID uuid.
 	})
 }
 
+func (service *Service) RevokeSessions(ctx context.Context, actor Actor, targetID uuid.UUID, reason ActionReason) error {
+	if actor.AdminID == targetID && targetID != uuid.Nil {
+		return ErrSelfManagement
+	}
+	if targetID == uuid.Nil || !validActionReason(reason) {
+		return ErrInvalidRequest
+	}
+	return service.mutateAdministrator(ctx, actor, targetID, reason, func(tx pgx.Tx, target administratorRecord, now time.Time) (audit.Record, error) {
+		if target.Status != StatusActive {
+			return audit.Record{}, ErrStateConflict
+		}
+		revoked, err := revokeAdministratorSessionsCount(ctx, tx, target.ID, now)
+		if err != nil {
+			return audit.Record{}, err
+		}
+		if revoked == 0 {
+			return audit.Record{}, nil
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE admin_users
+			SET security_version = security_version + 1, updated_at = $2
+			WHERE id = $1
+		`, target.ID, now); err != nil {
+			return audit.Record{}, errors.New("administrator security version could not be advanced")
+		}
+		return audit.Record{
+			EventType: "admin_sessions_revoked", ObjectType: "admin_user", ObjectID: &target.ID,
+			BeforeState: map[string]string{"session_status": "active"}, AfterState: map[string]string{"session_status": "revoked"},
+		}, nil
+	})
+}
+
 type administratorMutation func(pgx.Tx, administratorRecord, time.Time) (audit.Record, error)
 
 func (service *Service) mutateAdministrator(
@@ -826,14 +858,20 @@ func generateRecoveryCredentials() ([]string, []recoveryCredential, error) {
 }
 
 func revokeAdministratorSessions(ctx context.Context, tx pgx.Tx, adminID uuid.UUID, now time.Time) error {
-	if _, err := tx.Exec(ctx, `
+	_, err := revokeAdministratorSessionsCount(ctx, tx, adminID, now)
+	return err
+}
+
+func revokeAdministratorSessionsCount(ctx context.Context, tx pgx.Tx, adminID uuid.UUID, now time.Time) (int64, error) {
+	command, err := tx.Exec(ctx, `
 		UPDATE admin_sessions
 		SET revoked_at = $2
 		WHERE admin_user_id = $1 AND revoked_at IS NULL
-	`, adminID, now); err != nil {
-		return errors.New("administrator sessions could not be revoked")
+	`, adminID, now)
+	if err != nil {
+		return 0, errors.New("administrator sessions could not be revoked")
 	}
-	return nil
+	return command.RowsAffected(), nil
 }
 
 func validDisplayName(value string) bool {

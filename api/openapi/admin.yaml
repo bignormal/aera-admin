@@ -1,0 +1,719 @@
+openapi: 3.1.0
+info:
+  title: Aera Admin Browser API
+  version: 0.1.0
+  description: |
+    公司内部 Aera Admin 一期安全控制台 API。当前契约仅覆盖独立管理员身份、
+    强制 TOTP、会话、激活和固定角色管理；不包含尚未接入的 Aera Cloud 管理接口。
+
+    所有浏览器请求同源发送且响应均为 `Cache-Control: no-store`。除 GET/HEAD/OPTIONS
+    外，服务端还会校验精确 Origin；已认证的写请求同时要求内存中的 CSRF 值。
+servers:
+  - url: /api/v1
+    description: 与 Aera Admin SPA 同源
+tags:
+  - name: Authentication
+  - name: Activation
+  - name: Administrators
+
+paths:
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: 验证独立管理员邮箱和密码
+      description: 成功只返回短期登录挑战，不创建会话 Cookie。
+      operationId: beginAdministratorLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 密码验证成功，必须继续完成 TOTP 或恢复码验证
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginChallenge'
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/InvalidCredentials' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/totp/verify:
+    post:
+      tags: [Authentication]
+      summary: 完成管理员双因素登录
+      description: "`totp_code` 与 `recovery_code` 必须且只能提供一个；成功设置 HttpOnly 会话 Cookie。"
+      operationId: completeAdministratorLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteLoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionEstablished'
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/InvalidCredentials' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/step-up:
+    post:
+      tags: [Authentication]
+      summary: 刷新高风险操作所需的近期 TOTP 状态
+      operationId: stepUpAdministratorSession
+      security:
+        - adminSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepUpRequest'
+      responses:
+        '200':
+          description: TOTP Step-up 成功；会话建立方式保持不变
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDocument'
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/StepUpUnauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: 撤销当前管理员会话
+      operationId: logoutAdministrator
+      security:
+        - adminSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: 当前会话已撤销并清除 Cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusDocument'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /me:
+    get:
+      tags: [Authentication]
+      summary: 获取当前管理员会话并重新签发内存 CSRF 值
+      operationId: getAdministratorSession
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: 当前有效会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDocument'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/activation/prepare:
+    post:
+      tags: [Activation]
+      summary: 验证一次性激活令牌并取得 TOTP 配置 URI
+      description: 原始令牌来自 `/activate#token=...` Fragment，浏览器读取并清除 Fragment 后才调用此接口。
+      operationId: prepareAdministratorActivation
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivationTokenRequest'
+      responses:
+        '200':
+          description: 激活上下文和一次性 TOTP 配置 URI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationPreparation'
+        '400': { $ref: '#/components/responses/ActivationInvalid' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/activate:
+    post:
+      tags: [Activation]
+      summary: 激活管理员凭证或完成 TOTP 重置
+      description: 成功后恢复码只返回这一次；此接口不会创建登录会话。
+      operationId: activateAdministrator
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateRequest'
+      responses:
+        '200':
+          description: 激活完成与一次性恢复码
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationResult'
+        '400': { $ref: '#/components/responses/ActivationInvalid' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin-users:
+    get:
+      tags: [Administrators]
+      summary: 列出脱敏内部管理员
+      operationId: listAdministrators
+      security:
+        - adminSession: []
+      responses:
+        '200':
+          description: 管理员列表；不包含完整邮箱或凭证材料
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Administrator'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin-users/invitations:
+    post:
+      tags: [Administrators]
+      summary: 邀请固定角色的内部管理员
+      description: 需要 `administrator.manage` 和 10 分钟内的 TOTP Step-up。
+      operationId: inviteAdministrator
+      security:
+        - adminSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteAdministratorRequest'
+      responses:
+        '201':
+          description: 邀请已创建；完整激活链接只返回这一次
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationResult'
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin-users/{adminID}/role:
+    put:
+      tags: [Administrators]
+      summary: 调整内部管理员固定角色
+      operationId: changeAdministratorRole
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role, reason_code]
+              properties:
+                role: { $ref: '#/components/schemas/AdminRole' }
+                reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+                ticket_reference: { type: string, maxLength: 120 }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AdministratorNotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin-users/{adminID}/suspend:
+    post:
+      tags: [Administrators]
+      summary: 暂停内部管理员并撤销其会话
+      operationId: suspendAdministrator
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionReason'
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AdministratorNotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin-users/{adminID}/sessions/revoke:
+    post:
+      tags: [Administrators]
+      summary: 撤销目标管理员的全部当前会话
+      description: |
+        需要 `administrator.manage` 和 10 分钟内的 TOTP Step-up。账号保持有效，目标管理员可以重新登录；
+        当目标已无有效会话时返回成功，且不会再次增加安全版本或重复写入审计事件。
+      operationId: revokeAdministratorSessions
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionReason'
+      responses:
+        '200': { $ref: '#/components/responses/StatusOK' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AdministratorNotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /admin-users/{adminID}/totp/reset:
+    post:
+      tags: [Administrators]
+      summary: 撤销目标会话并生成一次性 TOTP 重绑定链接
+      operationId: resetAdministratorTOTP
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionReason'
+      responses:
+        '201':
+          description: 重绑定邀请已创建；完整链接只返回这一次
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationResult'
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/AdministratorNotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: __Host-aera_admin_session
+      description: Secure、HttpOnly、SameSite=Strict 的管理员会话 Cookie。
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: "`/me` 或会话建立响应返回，仅保存在页面内存中。"
+
+  parameters:
+    AdminID:
+      name: adminID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    AdminRole:
+      type: string
+      enum: [super_admin, developer, operator, support, finance, auditor]
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          writeOnly: true
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+
+    LoginChallenge:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, expires_at]
+      properties:
+        challenge_id:
+          type: string
+          x-sensitive: true
+        expires_at:
+          type: string
+          format: date-time
+
+    CompleteLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, totp_code, recovery_code]
+      properties:
+        challenge_id:
+          type: string
+          writeOnly: true
+        totp_code:
+          type: string
+          maxLength: 6
+          writeOnly: true
+        recovery_code:
+          type: string
+          maxLength: 128
+          writeOnly: true
+      oneOf:
+        - properties:
+            totp_code: { type: string, pattern: '^\d{6}$' }
+            recovery_code: { type: string, maxLength: 0 }
+        - properties:
+            totp_code: { type: string, maxLength: 0 }
+            recovery_code: { type: string, minLength: 1 }
+
+    StepUpRequest:
+      type: object
+      additionalProperties: false
+      required: [totp_code]
+      properties:
+        totp_code:
+          type: string
+          pattern: '^\d{6}$'
+          writeOnly: true
+
+    AdministratorPrincipal:
+      type: object
+      additionalProperties: false
+      required:
+        - admin_id
+        - session_id
+        - role
+        - security_version
+        - mfa_authenticated_at
+        - totp_authenticated_at
+        - mfa_method
+      properties:
+        admin_id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        role: { $ref: '#/components/schemas/AdminRole' }
+        security_version: { type: integer, format: int64, minimum: 1 }
+        mfa_authenticated_at: { type: string, format: date-time }
+        totp_authenticated_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        mfa_method:
+          type: string
+          enum: [totp, recovery]
+
+    SessionDocument:
+      type: object
+      additionalProperties: false
+      required: [csrf_token, administrator, display_name, absolute_expires_at]
+      properties:
+        csrf_token:
+          type: string
+          x-sensitive: true
+          description: 仅驻留页面内存，不写入 Web Storage。
+        administrator:
+          $ref: '#/components/schemas/AdministratorPrincipal'
+        display_name:
+          type: string
+        absolute_expires_at:
+          type: string
+          format: date-time
+
+    ActivationTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 128
+          writeOnly: true
+
+    ActivationPreparation:
+      type: object
+      additionalProperties: false
+      required: [admin_id, display_name, masked_identity, purpose, provisioning_uri, expires_at]
+      properties:
+        admin_id: { type: string, format: uuid }
+        display_name: { type: string }
+        masked_identity:
+          type: string
+          description: 后端生成的脱敏身份，例如 `a***@example.com`。
+        purpose:
+          type: string
+          enum: [activation, totp_reset]
+        provisioning_uri:
+          type: string
+          x-sensitive: true
+          description: 只用于本页 QR 渲染，不显示密钥文本且离页后清除内存缓存。
+        expires_at: { type: string, format: date-time }
+
+    ActivateRequest:
+      type: object
+      additionalProperties: false
+      required: [token, password, totp_code]
+      properties:
+        token: { type: string, maxLength: 128, writeOnly: true }
+        password: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+        totp_code: { type: string, pattern: '^\d{6}$', writeOnly: true }
+
+    ActivationResult:
+      type: object
+      additionalProperties: false
+      required: [admin_id, recovery_codes]
+      properties:
+        admin_id: { type: string, format: uuid }
+        recovery_codes:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items: { type: string, x-sensitive: true }
+          description: 只返回和展示一次。
+
+    Administrator:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - masked_identity
+        - display_name
+        - role
+        - status
+        - mfa_enabled
+        - security_version
+        - created_at
+        - updated_at
+      properties:
+        id: { type: string, format: uuid }
+        masked_identity:
+          type: string
+          description: 后端脱敏身份，不得包含完整邮箱或手机号。
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/AdminRole' }
+        status:
+          type: string
+          enum: [invited, active, suspended]
+        mfa_enabled: { type: boolean }
+        security_version: { type: integer, format: int64, minimum: 1 }
+        last_login_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ActionReason:
+      type: object
+      additionalProperties: false
+      required: [reason_code]
+      properties:
+        reason_code:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{2,63}$'
+        ticket_reference:
+          type: string
+          maxLength: 120
+        note:
+          type: string
+          maxLength: 500
+
+    InviteAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required: [email, display_name, role, reason_code]
+      properties:
+        email: { type: string, format: email, maxLength: 254, writeOnly: true }
+        display_name: { type: string, minLength: 1, maxLength: 80 }
+        role: { $ref: '#/components/schemas/AdminRole' }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 120 }
+        note: { type: string, maxLength: 500 }
+
+    InvitationResult:
+      type: object
+      additionalProperties: false
+      required: [invitation_id, admin_id, activation_url, expires_at]
+      properties:
+        invitation_id: { type: string, format: uuid }
+        admin_id: { type: string, format: uuid }
+        activation_url:
+          type: string
+          format: uri
+          x-sensitive: true
+          description: 只返回和展示一次，令牌位于 URL Fragment。
+        expires_at: { type: string, format: date-time }
+
+    StatusDocument:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, const: ok }
+
+    ErrorDocument:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+  responses:
+    SessionEstablished:
+      description: 管理员会话已建立
+      headers:
+        Set-Cookie:
+          description: "`__Host-aera_admin_session` Secure、HttpOnly、SameSite=Strict Cookie"
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SessionDocument'
+    StatusOK:
+      description: 操作完成
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StatusDocument'
+    InvalidRequest:
+      description: 严格 JSON 或字段校验失败
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: INVALID_REQUEST, message: 请求内容无效 } }
+    InvalidCredentials:
+      description: 管理员凭证无效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: AUTH_INVALID_CREDENTIALS, message: 管理员凭证无效 } }
+    AuthRequired:
+      description: 需要有效管理员会话
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: AUTH_REQUIRED, message: 需要有效的管理员会话 } }
+    StepUpUnauthorized:
+      description: 管理员会话无效，或 TOTP 凭证无效、过期或被重放
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          examples:
+            authRequired:
+              value: { error: { code: AUTH_REQUIRED, message: 需要有效的管理员会话 } }
+            invalidCredentials:
+              value: { error: { code: AUTH_INVALID_CREDENTIALS, message: 管理员凭证无效 } }
+    Forbidden:
+      description: Origin、CSRF、角色权限或 Step-up 不满足
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+    ActivationInvalid:
+      description: 激活令牌、密码或 TOTP 无效或已过期
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: ACTIVATION_INVALID, message: 激活信息无效或已过期 } }
+    RateLimited:
+      description: 原子 account/session 或 IP 尝试限制已生效
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1, maximum: 900 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: RATE_LIMITED, message: 尝试过于频繁，请稍后重试 } }
+    AdministratorNotFound:
+      description: 目标管理员不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+    StateConflict:
+      description: 身份已存在、管理员状态冲突、自我管理或最小超级管理员约束
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+    InternalError:
+      description: 未归类的内部处理失败；响应不暴露内部错误细节
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: INTERNAL_ERROR, message: 服务暂时不可用 } }
+    AuthUnavailable:
+      description: 认证、审计、PostgreSQL 或 Redis 不可用；系统失败关闭
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: AUTH_UNAVAILABLE, message: 认证服务暂时不可用 } }

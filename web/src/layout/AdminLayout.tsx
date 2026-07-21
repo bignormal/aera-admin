@@ -6,38 +6,56 @@ import {
   DesktopOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  LogoutOutlined,
   SafetyCertificateOutlined,
-  SearchOutlined,
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
-import { Avatar, Breadcrumb, Button, Input, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
+import { hasAnyPermission, roleLabels, type Permission } from '../api/contracts';
+import { useAuth } from '../auth/AuthProvider';
+import { FullPageLoader } from '../auth/PermissionGate';
 import '../styles/global.css';
 
 const { Content, Header, Sider } = Layout;
 
-const navigation = [
+interface NavigationItem {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  permissions?: readonly Permission[];
+}
+
+const navigation: NavigationItem[] = [
   { key: '/dashboard', label: '工作台', icon: <DashboardOutlined /> },
-  { key: '/security/admins', label: '内部管理员', icon: <TeamOutlined /> },
-  { key: '/security/roles', label: '角色与权限', icon: <SafetyCertificateOutlined /> },
-  { key: '/cloud/users', label: '用户与访问', icon: <DatabaseOutlined /> },
-  { key: '/cloud/devices', label: '设备与会话', icon: <DesktopOutlined /> },
-  { key: '/approvals', label: '处置审批', icon: <CheckSquareOutlined /> },
-  { key: '/audit', label: '审计记录', icon: <AuditOutlined /> },
-  { key: '/system/health', label: '服务健康', icon: <SettingOutlined /> },
-] as const;
+  { key: '/security/admins', label: '内部管理员', icon: <TeamOutlined />, permissions: ['administrator.read'] },
+  { key: '/security/roles', label: '角色与权限', icon: <SafetyCertificateOutlined />, permissions: ['administrator.read'] },
+  { key: '/cloud/users', label: '用户与访问', icon: <DatabaseOutlined />, permissions: ['cloud_user.read'] },
+  { key: '/cloud/devices', label: '设备与会话', icon: <DesktopOutlined />, permissions: ['cloud_device.read'] },
+  { key: '/approvals', label: '处置审批', icon: <CheckSquareOutlined />, permissions: ['account_lifecycle.initiate', 'account_lifecycle.approve'] },
+  { key: '/audit', label: '审计记录', icon: <AuditOutlined />, permissions: ['audit.read_full', 'audit.read_own'] },
+  { key: '/system/health', label: '服务健康', icon: <SettingOutlined />, permissions: ['service_health.read'] },
+];
 
 export function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const active = useMemo(
-    () => navigation.find((item) => location.pathname.startsWith(item.key)) ?? navigation[0],
-    [location.pathname],
+  const auth = useAuth();
+  const role = auth.session?.administrator.role;
+  const visibleNavigation = useMemo(
+    () => navigation.filter((item) => !item.permissions || (role && hasAnyPermission(role, item.permissions))),
+    [role],
   );
+  const active = useMemo(
+    () => visibleNavigation.find((item) => location.pathname.startsWith(item.key)) ?? visibleNavigation[0],
+    [location.pathname, visibleNavigation],
+  );
+
+  if (!auth.session || !active) return <FullPageLoader />;
 
   return (
     <Layout className="admin-shell">
@@ -63,7 +81,7 @@ export function AdminLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[active.key]}
-          items={navigation.map((item) => ({ ...item }))}
+          items={visibleNavigation.map((item) => ({ ...item }))}
           onClick={({ key }) => void navigate(key)}
         />
         {!collapsed && (
@@ -83,20 +101,32 @@ export function AdminLayout() {
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed((value) => !value)}
             />
-            <Input
-              className="admin-global-search"
-              prefix={<SearchOutlined />}
-              placeholder="搜索用户 ID、设备 ID 或操作 ID"
-              aria-label="全局搜索"
-            />
+            <Typography.Text strong>{active.label}</Typography.Text>
           </Space>
           <Space size={12}>
             <Tag color="blue">内部系统</Tag>
-            <Avatar size={32}>管</Avatar>
-            <span className="admin-operator">
-              <strong>管理员</strong>
-              <small>安全会话</small>
-            </span>
+            <Tag color={auth.session.administrator.mfa_method === 'recovery' ? 'orange' : 'green'}>
+              {auth.session.administrator.mfa_method === 'recovery' ? '恢复会话' : 'TOTP 会话'}
+            </Tag>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [{ key: 'logout', icon: <LogoutOutlined />, label: '安全退出' }],
+                onClick: () =>
+                  void auth
+                    .logout()
+                    .catch(() => undefined)
+                    .finally(() => navigate('/login', { replace: true })),
+              }}
+            >
+              <Button type="text" className="admin-account-button">
+                <Avatar size={32}>{auth.session.display_name.slice(0, 1)}</Avatar>
+                <span className="admin-operator">
+                  <strong>{auth.session.display_name}</strong>
+                  <small>{roleLabels[auth.session.administrator.role]}</small>
+                </span>
+              </Button>
+            </Dropdown>
           </Space>
         </Header>
 

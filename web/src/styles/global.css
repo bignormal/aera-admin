@@ -120,14 +120,17 @@ input {
   line-height: normal;
 }
 
-.admin-global-search {
-  width: 360px;
-  background: #f6f8fb;
-}
-
 .admin-operator strong {
   font-size: 13px;
   font-weight: 600;
+}
+
+.admin-account-button {
+  display: inline-flex;
+  height: 48px;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 8px;
 }
 
 .admin-context-bar {
@@ -236,8 +239,119 @@ input {
   margin-top: 14px;
 }
 
+.data-card {
+  border: 1px solid #e7ebf1;
+  box-shadow: 0 5px 18px rgb(16 24 40 / 4%);
+}
+
+.data-card > .ant-card-body {
+  padding: 0;
+}
+
+.data-card-toolbar {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.page-alert {
+  margin-bottom: 14px;
+}
+
+.data-card .page-alert {
+  margin: 14px 16px;
+}
+
+.table-primary-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.table-primary-cell strong {
+  overflow: hidden;
+  color: #25324a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-primary-cell span {
+  overflow: hidden;
+  color: #7a8699;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-form {
+  margin-top: 20px;
+}
+
+.one-time-secret {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 12px;
+  border: 1px solid #e2e7ef;
+  border-radius: 7px;
+  background: #f6f8fb;
+}
+
+.one-time-secret code {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  color: #344054;
+  font-size: 12px;
+}
+
+.role-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.role-summary-card .ant-card-body {
+  display: flex;
+  min-height: 76px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-summary-card .ant-typography-secondary {
+  font-size: 12px;
+}
+
+.permission-allowed {
+  color: #20a174;
+  font-size: 16px;
+}
+
+.permission-denied {
+  color: #c6cdd8;
+  font-size: 16px;
+}
+
+.auth-boundary-state {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #667085;
+  background: #f5f7fb;
+}
+
 @media (max-width: 1280px) {
-  .admin-global-search {
-    width: 280px;
+  .role-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
