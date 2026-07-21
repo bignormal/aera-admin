@@ -1,7 +1,8 @@
 # Aera Admin Foundation V1 增量设计（Admin-only）
 
-- 状态：已批准，待书面复核
+- 状态：已批准
 - 设计批准日期：2026-07-22
+- 书面复核确认日期：2026-07-22
 - 父规格：`docs/superpowers/specs/2026-07-21-aera-admin-phase-1-design.md`
 - 实施仓库：`/Users/zizimutou/Desktop/aera/aera-admin`
 - 远端仓库：`https://github.com/bignormal/aera-admin`
