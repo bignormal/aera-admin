@@ -68,7 +68,13 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 		return err
 	}
 
-	handler := httpapi.New(httpapi.Dependencies{PostgreSQL: postgres, Redis: redisStore, API: adminAPI, Web: webui.EmbeddedHandler()})
+	handler := httpapi.New(httpapi.Dependencies{
+		PostgreSQL: postgres,
+		Redis:      redisStore,
+		API:        adminAPI,
+		Web:        webui.EmbeddedHandler(),
+		Production: settings.Environment == "production",
+	})
 	server := newHTTPServer(settings.ListenAddr, handler)
 	serveResult := make(chan error, 1)
 	go func() {

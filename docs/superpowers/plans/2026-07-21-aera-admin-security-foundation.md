@@ -110,7 +110,7 @@ type SessionManager interface {
 - Produces: `httpapi.New(httpapi.Dependencies) http.Handler` with `/health/live` and `/health/ready`.
 - Produces: PostgreSQL and Redis values satisfying `Ping(context.Context) error`.
 
-- [ ] **Step 1: Write strict configuration tests**
+- [x] **Step 1: Write strict configuration tests**
 
 ```go
 func TestLoadRequiresEverySecuritySecret(t *testing.T) {
@@ -132,13 +132,13 @@ func TestLoadRejectsNonHTTPSProductionURL(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run configuration tests and verify failure**
+- [x] **Step 2: Run configuration tests and verify failure**
 
 Run: `go test ./internal/config -run TestLoad -v`
 
 Expected: FAIL because `Load` does not exist.
 
-- [ ] **Step 3: Implement strict configuration parsing**
+- [x] **Step 3: Implement strict configuration parsing**
 
 ```go
 type Config struct {
@@ -189,7 +189,7 @@ func Load(lookup LookupEnv) (Config, error) {
 
 `parseKeyRing` accepts a JSON object with `active_key_id` and base64-encoded `keys`, rejects missing active keys and keys shorter than 32 bytes, and returns copied byte slices. `parsePublicURL` requires an origin-only URL and HTTPS in production. Errors name only the environment variable, never its value.
 
-- [ ] **Step 4: Write health endpoint tests**
+- [x] **Step 4: Write health endpoint tests**
 
 ```go
 func TestReadinessFailsClosedWhenDependencyFails(t *testing.T) {
@@ -203,7 +203,7 @@ func TestReadinessFailsClosedWhenDependencyFails(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Implement the Chi router and server composition**
+- [x] **Step 5: Implement the Chi router and server composition**
 
 ```go
 type HealthChecker interface { Ping(context.Context) error }
@@ -219,7 +219,7 @@ func New(deps Dependencies) http.Handler {
 }
 ```
 
-- [ ] **Step 6: Verify backend foundation**
+- [x] **Step 6: Verify backend foundation**
 
 Run: `go test ./internal/config ./internal/httpapi ./internal/store`
 
@@ -259,7 +259,7 @@ git commit -m "feat: bootstrap Aera Admin service"
 - Produces: `webui.New(fs.FS) http.Handler` for embedded SPA files.
 - Produces: `AdminLayout` with approved navigation labels and desktop tab strip.
 
-- [ ] **Step 1: Write a failing shell test**
+- [x] **Step 1: Write a failing shell test**
 
 ```tsx
 it('renders the approved phase-one navigation', () => {
@@ -270,13 +270,13 @@ it('renders the approved phase-one navigation', () => {
 });
 ```
 
-- [ ] **Step 2: Scaffold Vite and verify the test fails**
+- [x] **Step 2: Scaffold Vite and verify the test fails**
 
 Run: `cd web && pnpm install && pnpm test --run src/layout/AdminLayout.test.tsx`
 
 Expected: FAIL because `AdminLayout` is absent.
 
-- [ ] **Step 3: Implement the shell and Aera theme**
+- [x] **Step 3: Implement the shell and Aera theme**
 
 ```tsx
 export const aeraTheme: ThemeConfig = {
@@ -305,7 +305,7 @@ export function AdminLayout() {
 
 The navigation model must contain route and required permission, so later RBAC filtering does not duplicate labels in view code.
 
-- [ ] **Step 4: Write and implement SPA fallback tests**
+- [x] **Step 4: Write and implement SPA fallback tests**
 
 ```go
 func TestHandlerServesIndexForClientRouteButNotMissingAsset(t *testing.T) {
@@ -317,7 +317,7 @@ func TestHandlerServesIndexForClientRouteButNotMissingAsset(t *testing.T) {
 
 `handler.go` must set immutable caching only for hashed assets and `no-store` for `index.html`.
 
-- [ ] **Step 5: Verify frontend and Go web handler**
+- [x] **Step 5: Verify frontend and Go web handler**
 
 Run: `cd web && pnpm test --run && pnpm build`
 
@@ -331,7 +331,7 @@ Run after `pnpm build`: `go test -tags release ./internal/webui ./cmd/aera-admin
 
 Expected: PASS with Vite output embedded from ignored `internal/webui/dist` files. Normal tests embed the checked-in fallback page, so Vite builds never modify tracked files.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add web internal/webui
@@ -351,7 +351,7 @@ git commit -m "feat: add Aera Admin application shell"
 - Produces: `store.Migrate(context.Context, *pgxpool.Pool) error`.
 - Produces tables `admin_users`, `admin_identities`, `admin_password_credentials`, `admin_totp_credentials`, `admin_recovery_codes`, `admin_sessions`, `admin_invitations`, `admin_audit_events`, `admin_audit_checkpoints`, and `reason_codes`.
 
-- [ ] **Step 1: Write migration contract tests**
+- [x] **Step 1: Write migration contract tests**
 
 ```go
 func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
@@ -364,13 +364,13 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the migration test and verify failure**
+- [x] **Step 2: Run the migration test and verify failure**
 
 Run: `docker compose up -d postgres redis && go test ./internal/store -run TestMigrate -v`
 
 Expected: FAIL because the migration runner and tables do not exist.
 
-- [ ] **Step 3: Write the complete initial SQL migration**
+- [x] **Step 3: Write the complete initial SQL migration**
 
 The migration must use UUID primary keys, timestamptz timestamps, explicit checks for all enum-like values, token/hash length checks, and foreign keys. The central constraints are:
 
@@ -495,7 +495,7 @@ CREATE TABLE reason_codes (
 
 The migration seeds stable administrator reason codes and grants the runtime database role `SELECT, INSERT` only on `admin_audit_events`; update and delete are not granted.
 
-- [ ] **Step 4: Implement ordered embedded migrations**
+- [x] **Step 4: Implement ordered embedded migrations**
 
 ```go
 //go:embed migrations/*.sql
@@ -545,13 +545,13 @@ func Migrate(ctx context.Context, postgres *pgxpool.Pool) error {
 
 The SQL file is canonical and embedded directly from the package subtree. Tests run `Migrate` twice and require the second call to be a no-op.
 
-- [ ] **Step 5: Verify migrations and local dependencies**
+- [x] **Step 5: Verify migrations and local dependencies**
 
 Run: `go test ./internal/store -run TestMigrate -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store compose.yaml Makefile
@@ -572,7 +572,7 @@ git commit -m "feat: add administrator security schema"
 - Produces: `auth.Require(permission rbac.Permission, next http.Handler) http.Handler`.
 - Consumes: `auth.Principal` populated by session authentication.
 
-- [ ] **Step 1: Encode the approved matrix as tests**
+- [x] **Step 1: Encode the approved matrix as tests**
 
 ```go
 func TestFixedMatrix(t *testing.T) {
@@ -593,7 +593,7 @@ func TestFixedMatrix(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Verify failure, then implement explicit permission sets**
+- [x] **Step 2: Verify failure, then implement explicit permission sets**
 
 Run: `go test ./internal/rbac -run TestFixedMatrix -v`
 
@@ -610,7 +610,7 @@ var permissions = map[Role]map[Permission]struct{}{
 }
 ```
 
-- [ ] **Step 3: Test API enforcement rather than menu hiding**
+- [x] **Step 3: Test API enforcement rather than menu hiding**
 
 ```go
 func TestRequireRejectsAuthenticatedRoleWithoutPermission(t *testing.T) {
@@ -621,13 +621,13 @@ func TestRequireRejectsAuthenticatedRoleWithoutPermission(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Implement middleware and verify**
+- [x] **Step 4: Implement middleware and verify**
 
 Run: `go test ./internal/rbac ./internal/auth -run 'TestFixedMatrix|TestRequire' -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/rbac internal/auth/context.go internal/auth/middleware.go internal/auth/middleware_test.go
@@ -652,7 +652,7 @@ git commit -m "feat: enforce fixed administrator RBAC"
 - Produces: `NewOpaqueToken(bytes int) (raw string, digest [32]byte, error)`.
 - Produces: `TOTP.Generate`, `TOTP.Validate` and provisioning URI generation.
 
-- [ ] **Step 1: Write password behavior tests**
+- [x] **Step 1: Write password behavior tests**
 
 ```go
 func TestPasswordHasherUsesArgon2idAndRandomSalt(t *testing.T) {
@@ -670,11 +670,11 @@ func TestPasswordHasherRequiresTwelveRunes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Implement versioned Argon2id**
+- [x] **Step 2: Implement versioned Argon2id**
 
 Use parameters `m=65536 KiB`, `t=3`, `p=1`, 16-byte random salt, and 32-byte output for version 1. Encoded hashes use `$aera-admin$1$argon2id$v=19$...`; parsing must reject parameter substitution instead of trusting encoded costs.
 
-- [ ] **Step 3: Test encrypted email plus HMAC lookup**
+- [x] **Step 3: Test encrypted email plus HMAC lookup**
 
 ```go
 func TestIdentityCodecNeverUsesPlaintextAsLookup(t *testing.T) {
@@ -689,7 +689,7 @@ func TestIdentityCodecNeverUsesPlaintextAsLookup(t *testing.T) {
 
 Normalize by trimming surrounding whitespace and lowercasing the complete admin email, then validate one `@`, total byte length at most 254, non-empty local/domain, valid UTF-8, and no control characters. Seal with AES-256-GCM and type-specific AAD; index with HMAC-SHA256 and versioned keys.
 
-- [ ] **Step 4: Test RFC 6238 validation and replay guard**
+- [x] **Step 4: Test RFC 6238 validation and replay guard**
 
 ```go
 func TestTOTPRejectsAcceptedTimeStepReplay(t *testing.T) {
@@ -705,13 +705,13 @@ func TestTOTPRejectsAcceptedTimeStepReplay(t *testing.T) {
 
 Accept current step plus one adjacent step for clock skew, but reject every step less than or equal to the credential's `last_accepted_step`. Compare codes in constant time.
 
-- [ ] **Step 5: Verify secure primitives**
+- [x] **Step 5: Verify secure primitives**
 
 Run: `go test ./internal/secure -v`
 
 Expected: PASS, including malformed encoding and key-rotation cases.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/secure
@@ -732,7 +732,7 @@ git commit -m "feat: add administrator security primitives"
 - Produces: `audit.Service.Append(context.Context, audit.Record) (uuid.UUID, error)`.
 - Produces: `audit.Service.Verify(context.Context) error` for tests and scheduled verification.
 
-- [ ] **Step 1: Write hash-chain and redaction tests**
+- [x] **Step 1: Write hash-chain and redaction tests**
 
 ```go
 func TestAppendChainsCanonicalEventsWithoutSensitiveFields(t *testing.T) {
@@ -752,17 +752,17 @@ func TestAppendRejectsSensitiveReasonText(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Implement canonical encoding and transaction lock**
+- [x] **Step 2: Implement canonical encoding and transaction lock**
 
 Canonical bytes contain a schema version and length-prefixed allowlisted fields in a fixed order. `Append` starts a transaction, takes `pg_advisory_xact_lock` for the audit chain, reads the last event hash, computes SHA-256 over `previous_hash || canonical_event`, inserts once, and commits. There is no update or delete repository method.
 
-- [ ] **Step 3: Verify audit**
+- [x] **Step 3: Verify audit**
 
 Run: `go test ./internal/audit -v`
 
 Expected: PASS, including concurrent append, tamper detection, and sensitive-text rejection.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/audit
@@ -790,7 +790,7 @@ git commit -m "feat: add tamper-evident administrator audit"
 - Produces: `admin.Service.BootstrapInvite`, `admin.Service.Invite`, `admin.Service.PrepareActivation`, `admin.Service.Activate`, `admin.Service.List`, `admin.Service.ChangeRole`, `admin.Service.Suspend`, and `admin.Service.ResetTOTP`.
 - Consumes: secure identity/password/TOTP/token primitives and `audit.Recorder`.
 
-- [ ] **Step 1: Write lifecycle invariant tests**
+- [x] **Step 1: Write lifecycle invariant tests**
 
 ```go
 func TestCannotReduceActiveSuperAdminsBelowTwo(t *testing.T) {
@@ -807,13 +807,13 @@ func TestActivationConsumesInvitationAndRequiresTOTP(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Implement transactional invitation and activation**
+- [x] **Step 2: Implement transactional invitation and activation**
 
 `Invite` seals the administrator email, stores lookup HMAC and a 24-hour invitation-token digest, encrypts the pending TOTP secret through the versioned TOTP key ring, and emits audit without raw email. Duplicate detection checks every retained lookup key so rotation cannot create a second account. An expired invitation is reissued against the same `invited` administrator row while the previous invitation is atomically consumed. Migration `000002` explicitly invalidates pre-feature invitations that have no pending TOTP material; every live invitation must have a complete encrypted secret, and consumption clears that redundant secret copy.
 
 The one-time URL carries the raw token only in `/activate#token=...`; the fragment is never sent in the initial HTTP request. The activation client extracts and clears it, then calls `POST /auth/activation/prepare` with JSON to obtain the masked identity and provisioning URI. `Activate` locks the invitation and user, revalidates TOTP and the password-credential snapshot, stores credentials and eight recovery-code digests, changes status to active, consumes the invitation, and audits in one PostgreSQL transaction. TOTP reset keeps the independent password, revokes existing sessions, and requires password-protected rebinding.
 
-- [ ] **Step 3: Implement bootstrap CLI guardrails**
+- [x] **Step 3: Implement bootstrap CLI guardrails**
 
 ```text
 aera-admin-bootstrap invite-super-admin --email <value> --display-name <value>
@@ -821,7 +821,7 @@ aera-admin-bootstrap invite-super-admin --email <value> --display-name <value>
 
 The command is allowed only while fewer than two active super admins exist, prints the one-time activation URL once to stdout, never logs it, and rejects use after bootstrap completion.
 
-- [ ] **Step 4: Implement JSON HTTP adapter**
+- [x] **Step 4: Implement JSON HTTP adapter**
 
 ```text
 POST /api/v1/auth/activation/prepare
@@ -835,13 +835,13 @@ POST /api/v1/admin-users/{id}/totp/reset
 
 All management endpoints require `ManageAdministrators`; activation is token-authenticated. The rate limiter is shared with login and is attached in Task 8 before the service is production-ready. Responses never include the raw administrator email; invitation creation returns the one-time activation URL only to the initiating super admin. Request decoding is strict, bounded, and `no-store`; raw credentials and tokens are never copied into errors or audit records.
 
-- [ ] **Step 5: Verify lifecycle and CLI**
+- [x] **Step 5: Verify lifecycle and CLI**
 
 Run: `go test ./internal/admin ./cmd/aera-admin-bootstrap -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/admin internal/secure/secret.go internal/secure/secret_test.go internal/store/migrations/000002_invitation_totp.sql cmd/aera-admin cmd/aera-admin-bootstrap Makefile
@@ -1033,17 +1033,28 @@ Generated files under `internal/webui/dist` remain ignored. Docker and release b
 - Create: `e2e/auth.spec.ts`
 - Create: `e2e/rbac.spec.ts`
 - Create: `playwright.config.ts`
+- Create: `package.json`
+- Create: `pnpm-lock.yaml`
+- Create: `pnpm-workspace.yaml`
+- Create: `tsconfig.e2e.json`
+- Create: `.dockerignore`
 - Create: `Dockerfile`
 - Create: `README.md`
+- Create: `scripts/run-e2e.sh`
+- Create: `api/openapi_test.go`
+- Create: `internal/audit/e2e_acceptance_test.go`
 - Modify: `Makefile`
 - Modify: `.gitignore`
 - Modify: `cmd/aera-admin/main.go`
+- Modify: `internal/httpapi/server.go`
+- Modify: `internal/httpapi/server_test.go`
+- Replace: `web/pnpm-lock.yaml` and `web/pnpm-workspace.yaml` with the root workspace lockfiles.
 
 **Interfaces:**
 - Produces: `make check`, `make test`, `make build`, and `make e2e` as release gates.
 - Produces: a multi-stage container image with no source tree, package manager cache, or secrets.
 
-- [ ] **Step 1: Write end-to-end authentication and RBAC tests**
+- [x] **Step 1: Write end-to-end authentication and RBAC tests**
 
 ```ts
 test('support cannot call administrator management directly', async ({ request }) => {
@@ -1059,35 +1070,43 @@ test('password-only login never receives a session cookie', async ({ request }) 
 });
 ```
 
-- [ ] **Step 2: Add security-header and leakage assertions**
+- [x] **Step 2: Add security-header and leakage assertions**
 
 The suite inspects browser URLs, storage, network bodies returned by the server, captured structured logs, and audit rows for seeded password, TOTP, recovery-code, session-token, CSRF-token, and raw-email canaries. Every canary must be absent outside its permitted inbound request field.
 
-- [ ] **Step 3: Create reproducible multi-stage image**
+- [x] **Step 3: Create reproducible multi-stage image**
 
 ```dockerfile
-FROM node:24-alpine AS web
-WORKDIR /src/web
-COPY web/package.json web/pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
-COPY web/ ./
-RUN pnpm build
+ARG NODE_IMAGE=node:24.13.0-alpine3.23@sha256:...
+ARG GO_IMAGE=golang:1.26.5-alpine3.23@sha256:...
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot@sha256:...
 
-FROM golang:1.26.5-alpine AS go
+FROM ${NODE_IMAGE} AS web-build
+WORKDIR /src
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY web/package.json ./web/package.json
+RUN corepack enable && pnpm install --frozen-lockfile --filter @aera/admin-web...
+COPY web ./web
+RUN pnpm --filter @aera/admin-web build
+
+FROM ${GO_IMAGE} AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-COPY --from=web /src/internal/webui/dist ./internal/webui/dist
-RUN CGO_ENABLED=0 go build -tags release -trimpath -o /out/aera-admin ./cmd/aera-admin
+COPY cmd ./cmd
+COPY internal ./internal
+COPY --from=web-build /src/internal/webui/dist ./internal/webui/dist
+RUN CGO_ENABLED=0 go build -tags release -trimpath -o /out/aera-admin ./cmd/aera-admin && \
+    CGO_ENABLED=0 go build -trimpath -o /out/aera-admin-bootstrap ./cmd/aera-admin-bootstrap
 
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=go /out/aera-admin /aera-admin
-USER nonroot:nonroot
+FROM ${RUNTIME_IMAGE}
+COPY --from=go-build --chown=65532:65532 /out/aera-admin /aera-admin
+COPY --from=go-build --chown=65532:65532 /out/aera-admin-bootstrap /aera-admin-bootstrap
+USER 65532:65532
 ENTRYPOINT ["/aera-admin"]
 ```
 
-- [ ] **Step 4: Run the complete gate**
+- [x] **Step 4: Run the complete gate**
 
 Run: `make check`
 
@@ -1101,7 +1120,7 @@ Run: `docker build -t aera-admin:security-foundation .`
 
 Expected: image builds and `docker history` contains no secret values.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add e2e playwright.config.ts Dockerfile README.md Makefile .gitignore cmd/aera-admin/main.go

@@ -8,6 +8,8 @@ node_modules/
 dist/
 coverage/
 .vite/
+playwright-report/
+test-results/
 internal/webui/dist/
 
 bin/

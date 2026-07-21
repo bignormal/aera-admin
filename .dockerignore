@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.playwright-cli
+.superpowers
+.vscode
+**/node_modules
+bin
+coverage
+internal/webui/dist
+tmp
+*.log
+.DS_Store
+.env
+.env.*
