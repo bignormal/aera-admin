@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
   title: Aera Admin Browser API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    公司内部 Aera Admin 一期安全控制台 API。当前契约仅覆盖独立管理员身份、
-    强制 TOTP、会话、激活和固定角色管理；不包含尚未接入的 Aera Cloud 管理接口。
+    公司内部 Aera Admin 一期安全控制台 API。契约覆盖独立管理员身份、强制 TOTP、
+    会话、激活、固定角色管理，以及 Aera Admin 对外部 Aera Cloud Internal Admin API
+    的安全消费边界；真实 Cloud 服务端实现仍归属独立的 aera-cloud 仓库。
 
     所有浏览器请求同源发送且响应均为 `Cache-Control: no-store`。除 GET/HEAD/OPTIONS
     外，服务端还会校验精确 Origin；已认证的写请求同时要求内存中的 CSRF 值。
@@ -15,6 +16,11 @@ tags:
   - name: Authentication
   - name: Activation
   - name: Administrators
+  - name: CloudUsers
+  - name: CloudDevices
+  - name: Approvals
+  - name: Operations
+  - name: System
 
 paths:
   /auth/login:
@@ -357,6 +363,318 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/AuthUnavailable' }
 
+  /cloud-users:
+    get:
+      tags: [CloudUsers]
+      summary: 分页列出脱敏 Cloud 用户
+      operationId: listCloudUsers
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UserStatus'
+      responses:
+        '200': { $ref: '#/components/responses/CloudUserPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /cloud-users/lookup:
+    post:
+      tags: [CloudUsers]
+      summary: 按完整邮箱或手机号精确定位 Cloud 用户
+      description: 完整身份仅存在于本次请求体和到 Cloud 的单次调用边界；响应、日志与审计均保持脱敏。
+      operationId: lookupCloudUser
+      security:
+        - adminSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityLookupRequest'
+      responses:
+        '200': { $ref: '#/components/responses/CloudUser' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /cloud-users/{userID}:
+    get:
+      tags: [CloudUsers]
+      summary: 获取一个脱敏 Cloud 用户
+      operationId: getCloudUser
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200': { $ref: '#/components/responses/CloudUser' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /cloud-users/{userID}/devices:
+    get:
+      tags: [CloudDevices]
+      summary: 分页列出用户设备
+      operationId: listCloudUserDevices
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/CloudDevicePage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /cloud-users/{userID}/sessions:
+    get:
+      tags: [CloudDevices]
+      summary: 分页列出用户 Cloud 会话
+      operationId: listCloudUserSessions
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/CloudSessionPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /cloud-devices/{deviceID}/revoke:
+    post:
+      tags: [CloudDevices]
+      summary: 撤销一个 Cloud 设备
+      operationId: revokeCloudDevice
+      description: Requires a TOTP Step-up completed within the last 10 minutes.
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CloudMutation'
+      responses:
+        '202': { $ref: '#/components/responses/AdminOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /cloud-sessions/{sessionID}/revoke:
+    post:
+      tags: [CloudDevices]
+      summary: 撤销一个 Cloud 会话
+      operationId: revokeCloudSession
+      description: Requires a TOTP Step-up completed within the last 10 minutes.
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/SessionID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CloudMutation'
+      responses:
+        '202': { $ref: '#/components/responses/AdminOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /approval-requests:
+    get:
+      tags: [Approvals]
+      summary: 分页列出当前角色可见的审批申请
+      operationId: listApprovalRequests
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/ApprovalView'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/ApprovalPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Approvals]
+      summary: 发起账号停用或恢复审批
+      operationId: createApprovalRequest
+      description: Requires a TOTP Step-up completed within the last 10 minutes.
+      security:
+        - adminSession: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApprovalRequest'
+      responses:
+        '201': { $ref: '#/components/responses/ApprovalRequest' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '502': { $ref: '#/components/responses/CloudUnavailable' }
+        '503': { $ref: '#/components/responses/CloudUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /approval-requests/{approvalID}:
+    get:
+      tags: [Approvals]
+      summary: 获取审批详情及不可变事件时间线
+      operationId: getApprovalRequest
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+      responses:
+        '200': { $ref: '#/components/responses/ApprovalRequest' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /approval-requests/{approvalID}/approve:
+    post:
+      tags: [Approvals]
+      summary: 由不同的超级管理员批准申请
+      operationId: approveApprovalRequest
+      description: Requires a TOTP Step-up completed within the last 10 minutes.
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/EmptyJSON'
+      responses:
+        '202': { $ref: '#/components/responses/ApprovalRequest' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /approval-requests/{approvalID}/reject:
+    post:
+      tags: [Approvals]
+      summary: 由不同的超级管理员拒绝申请
+      operationId: rejectApprovalRequest
+      description: Requires a TOTP Step-up completed within the last 10 minutes.
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+      requestBody:
+        $ref: '#/components/requestBodies/EmptyJSON'
+      responses:
+        '200': { $ref: '#/components/responses/ApprovalRequest' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /approval-requests/{approvalID}/cancel:
+    post:
+      tags: [Approvals]
+      summary: 由发起人取消待审申请
+      operationId: cancelApprovalRequest
+      description: Requires a TOTP Step-up completed within the last 10 minutes.
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+      requestBody:
+        $ref: '#/components/requestBodies/EmptyJSON'
+      responses:
+        '200': { $ref: '#/components/responses/ApprovalRequest' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/StateConflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /operations/{operationID}:
+    get:
+      tags: [Operations]
+      summary: 查询管理员操作的可靠执行状态
+      operationId: getAdminOperation
+      security:
+        - adminSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperationID'
+      responses:
+        '200': { $ref: '#/components/responses/AdminOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /system/health:
+    get:
+      tags: [System]
+      summary: 获取不暴露内部地址或凭据的安全依赖健康状态
+      operationId: getAdminSystemHealth
+      security:
+        - adminSession: []
+      responses:
+        '200': { $ref: '#/components/responses/SystemHealth' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 components:
   securitySchemes:
     adminSession:
@@ -378,6 +696,72 @@ components:
       schema:
         type: string
         format: uuid
+
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 512 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    UserStatus:
+      name: status
+      in: query
+      schema: { $ref: '#/components/schemas/CloudUserStatus' }
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DeviceID:
+      name: deviceID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SessionID:
+      name: sessionID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ApprovalID:
+      name: approvalID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OperationID:
+      name: operationID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ApprovalView:
+      name: view
+      in: query
+      required: true
+      schema: { type: string, enum: [pending_for_me, mine, all] }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$'
+
+  requestBodies:
+    CloudMutation:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CloudMutationRequest' }
+    EmptyJSON:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
 
   schemas:
     AdminRole:
@@ -610,6 +994,249 @@ components:
           description: 只返回和展示一次，令牌位于 URL Fragment。
         expires_at: { type: string, format: date-time }
 
+    IdentityLookupRequest:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type: { type: string, enum: [email, phone] }
+        value: { type: string, minLength: 3, maxLength: 320, writeOnly: true }
+
+    CloudUserStatus:
+      type: string
+      enum: [active, pending_deletion, disabled]
+
+    CloudUser:
+      type: object
+      additionalProperties: false
+      required:
+        - user_id
+        - status
+        - administratively_disabled
+        - administrative_revision
+        - device_count
+        - active_device_count
+        - active_session_count
+        - created_at
+      anyOf:
+        - required: [masked_email]
+        - required: [masked_phone]
+      properties:
+        user_id: { type: string, format: uuid }
+        masked_email: { type: string, pattern: '^[^@* ]\*{3}@[A-Za-z0-9.-]+$' }
+        masked_phone: { type: string, pattern: '^[0-9]{3}\*{4}[0-9]{4}$' }
+        status: { $ref: '#/components/schemas/CloudUserStatus' }
+        administratively_disabled: { type: boolean }
+        deletion_finalized_at: { type: string, format: date-time }
+        administrative_revision: { type: integer, format: int64, minimum: 1 }
+        device_count: { type: integer, minimum: 0 }
+        active_device_count: { type: integer, minimum: 0 }
+        active_session_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        last_cloud_activity_at: { type: string, format: date-time }
+
+    CloudDevice:
+      type: object
+      additionalProperties: false
+      required: [device_id, user_id, display_name, platform, client_version, status]
+      properties:
+        device_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        platform: { type: string, minLength: 1, maxLength: 32 }
+        client_version: { type: string, minLength: 1, maxLength: 64 }
+        status: { type: string, enum: [active, inactive, revoked] }
+        last_seen_at: { type: string, format: date-time }
+
+    CloudSession:
+      type: object
+      additionalProperties: false
+      required: [session_id, user_id, device_id, status, issued_at, expires_at]
+      properties:
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        status: { type: string, enum: [active, rotated, expired, revoked, replay_detected] }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+
+    CloudUserPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CloudUser' }
+        next_cursor: { type: string, maxLength: 512 }
+
+    CloudDevicePage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CloudDevice' }
+        next_cursor: { type: string, maxLength: 512 }
+
+    CloudSessionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CloudSession' }
+        next_cursor: { type: string, maxLength: 512 }
+
+    CloudMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, reason_code]
+      properties:
+        expected_revision: { type: integer, format: int64, minimum: 1 }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+
+    CreateApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [action, target_user_id, reason_code]
+      properties:
+        action: { type: string, enum: [disable_user, enable_user] }
+        target_user_id: { type: string, format: uuid }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+
+    OperationState:
+      type: string
+      enum: [queued, executing, reconciling, succeeded, failed, conflict]
+
+    AdminOperation:
+      type: object
+      additionalProperties: false
+      required: [operation_id, state, updated_at]
+      properties:
+        operation_id: { type: string, format: uuid }
+        state: { $ref: '#/components/schemas/OperationState' }
+        error_code: { type: string, pattern: '^[A-Z][A-Z0-9_]{2,99}$' }
+        updated_at: { type: string, format: date-time }
+
+    ApprovalEvent:
+      type: object
+      additionalProperties: false
+      required: [id, event_type, before_status, after_status, actor_admin_id, actor_role, request_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        event_type: { type: string }
+        before_status: { type: string }
+        after_status: { type: string }
+        result_code: { type: string, pattern: '^[A-Z][A-Z0-9_]{2,99}$' }
+        actor_admin_id: { type: string, format: uuid }
+        actor_role: { $ref: '#/components/schemas/AdminRole' }
+        request_id: { type: string, maxLength: 128 }
+        created_at: { type: string, format: date-time }
+
+    ApprovalRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - action
+        - target_user_id
+        - target_snapshot
+        - requested_by_admin_id
+        - requested_by_role
+        - reason_code
+        - expected_revision
+        - approval_status
+        - execution_status
+        - expires_at
+        - created_at
+        - updated_at
+        - version
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, enum: [disable_user, enable_user] }
+        target_user_id: { type: string, format: uuid }
+        target_snapshot: { $ref: '#/components/schemas/CloudUser' }
+        requested_by_admin_id: { type: string, format: uuid }
+        requested_by_role: { type: string, const: operator }
+        reviewed_by_admin_id: { type: string, format: uuid }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+        expected_revision: { type: integer, format: int64, minimum: 1 }
+        approval_status: { type: string, enum: [pending_review, approved, rejected, expired, cancelled] }
+        execution_status: { type: string, enum: [not_started, queued, executing, reconciling, succeeded, failed, conflict] }
+        operation_id: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 1 }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/ApprovalEvent' }
+
+    ApprovalPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ApprovalRequest' }
+        next_cursor: { type: string, maxLength: 512 }
+
+    SystemHealth:
+      type: object
+      additionalProperties: false
+      required: [admin, postgres, redis, cloud]
+      properties:
+        admin: { type: string, const: ok }
+        postgres: { type: string, enum: [ok, unavailable] }
+        redis: { type: string, enum: [ok, unavailable] }
+        cloud: { $ref: '#/components/schemas/CloudHealth' }
+
+    CloudHealth:
+      type: object
+      additionalProperties: false
+      required: [configured, availability, mtls, service_jwt, upstream, checked_at]
+      properties:
+        configured: { type: boolean }
+        availability: { type: string, enum: [not_configured, available, unavailable, contract_error] }
+        mtls: { type: string, enum: [not_checked, ok, unavailable, contract_error] }
+        service_jwt: { type: string, enum: [not_checked, ok, unavailable, contract_error] }
+        upstream: { type: string, enum: [not_checked, ok, unavailable, contract_error] }
+        checked_at: { type: string, format: date-time }
+
+    CloudControlErrorDocument:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - CLOUD_NOT_CONFIGURED
+                - CLOUD_UNAVAILABLE
+                - CLOUD_CONTRACT_VIOLATION
+                - IDEMPOTENCY_KEY_REUSED
+                - APPROVAL_EXPIRED
+                - APPROVAL_SELF_REVIEW_FORBIDDEN
+                - APPROVAL_STATE_CONFLICT
+                - OPERATION_RECONCILING
+            message: { type: string }
+
     StatusDocument:
       type: object
       additionalProperties: false
@@ -631,6 +1258,56 @@ components:
             message: { type: string }
 
   responses:
+    CloudUserPage:
+      description: 仅含脱敏身份的 Cloud 用户页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CloudUserPage' }
+    CloudUser:
+      description: 一个仅含脱敏身份的 Cloud 用户
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CloudUser' }
+    CloudDevicePage:
+      description: Cloud 设备页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CloudDevicePage' }
+    CloudSessionPage:
+      description: Cloud 会话页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CloudSessionPage' }
+    AdminOperation:
+      description: 已接受或当前管理员操作状态
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AdminOperation' }
+    ApprovalRequest:
+      description: 审批申请及其安全快照
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApprovalRequest' }
+    ApprovalPage:
+      description: 审批申请页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApprovalPage' }
+    SystemHealth:
+      description: 不包含内部地址或凭据的依赖健康状态
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SystemHealth' }
+    CloudUnavailable:
+      description: Cloud 依赖未配置、不可用或不符合安全契约
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CloudControlErrorDocument' }
+    NotFound:
+      description: 目标不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
     SessionEstablished:
       description: 管理员会话已建立
       headers:

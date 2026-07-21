@@ -21,8 +21,8 @@ func TestOpenAPIContract(t *testing.T) {
 		t.Fatalf("OpenAPI version = %v, want 3.1.0", document["openapi"])
 	}
 	paths := object(t, document["paths"], "paths")
-	if len(paths) != 13 {
-		t.Fatalf("OpenAPI path count = %d, want 13", len(paths))
+	if len(paths) != 27 {
+		t.Fatalf("OpenAPI path count = %d, want 27", len(paths))
 	}
 	operationIDs := make(map[string]string)
 	for path, rawPathItem := range paths {
@@ -66,6 +66,79 @@ func TestOpenAPIContract(t *testing.T) {
 	assertSessionAndCSRF(t, roleOperation, "/admin-users/{adminID}/role")
 
 	walkReferences(t, document, document, "#")
+}
+
+func readContract(t *testing.T, name string) string {
+	t.Helper()
+	encoded, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(encoded)
+}
+
+func TestCloudBrowserContractHasEverySecuredOperation(t *testing.T) {
+	raw := readContract(t, "openapi/admin.yaml")
+	for _, operationID := range []string{
+		"listCloudUsers", "lookupCloudUser", "getCloudUser", "listCloudUserDevices",
+		"listCloudUserSessions", "revokeCloudDevice", "revokeCloudSession",
+		"createApprovalRequest", "listApprovalRequests", "getApprovalRequest",
+		"approveApprovalRequest", "rejectApprovalRequest", "cancelApprovalRequest",
+		"getAdminOperation", "getAdminSystemHealth",
+	} {
+		if !strings.Contains(raw, "operationId: "+operationID) {
+			t.Errorf("missing operation %s", operationID)
+		}
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := object(t, document["paths"], "paths")
+	for _, path := range []string{
+		"/cloud-users/lookup", "/cloud-devices/{deviceID}/revoke", "/cloud-sessions/{sessionID}/revoke",
+		"/approval-requests", "/approval-requests/{approvalID}/approve",
+		"/approval-requests/{approvalID}/reject", "/approval-requests/{approvalID}/cancel",
+	} {
+		operation := object(t, object(t, paths[path], path)["post"], path+" post")
+		assertSessionAndCSRF(t, operation, path)
+	}
+}
+
+func TestExactIdentityExistsOnlyInLookupRequestBody(t *testing.T) {
+	var document map[string]any
+	raw := readContract(t, "openapi/admin.yaml")
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := object(t, document["paths"], "paths")
+	for path, value := range paths {
+		if strings.Contains(strings.ToLower(path), "email") || strings.Contains(strings.ToLower(path), "phone") {
+			t.Errorf("identity field appears in path %s", path)
+		}
+		pathItem := object(t, value, path)
+		for method, operationValue := range pathItem {
+			operation, ok := operationValue.(map[string]any)
+			if !ok {
+				continue
+			}
+			parameters, _ := operation["parameters"].([]any)
+			for _, parameterValue := range parameters {
+				parameter, ok := parameterValue.(map[string]any)
+				if !ok {
+					continue
+				}
+				name, _ := parameter["name"].(string)
+				if strings.EqualFold(name, "email") || strings.EqualFold(name, "phone") || strings.EqualFold(name, "value") {
+					t.Errorf("identity parameter %s appears on %s %s", name, method, path)
+				}
+			}
+		}
+	}
+	if !strings.Contains(raw, "/cloud-users/lookup:") ||
+		!strings.Contains(raw, "$ref: '#/components/schemas/IdentityLookupRequest'") {
+		t.Fatal("POST lookup request body is missing")
+	}
 }
 
 func TestCloudConsumerContract(t *testing.T) {
