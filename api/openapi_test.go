@@ -68,6 +68,50 @@ func TestOpenAPIContract(t *testing.T) {
 	walkReferences(t, document, document, "#")
 }
 
+func TestCloudConsumerContract(t *testing.T) {
+	encoded, err := os.ReadFile("openapi/cloud-admin-client.yaml")
+	if err != nil {
+		t.Fatal("read Cloud Admin consumer contract")
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(encoded, &document); err != nil {
+		t.Fatal("parse Cloud Admin consumer contract")
+	}
+	if document["openapi"] != "3.1.0" {
+		t.Fatalf("Cloud OpenAPI version = %v, want 3.1.0", document["openapi"])
+	}
+	paths := object(t, document["paths"], "Cloud paths")
+	if len(paths) != 11 {
+		t.Fatalf("Cloud path count = %d, want 11", len(paths))
+	}
+	raw := string(encoded)
+	for _, operationID := range []string{
+		"getCloudAdminHealth", "listCloudUsers", "lookupCloudUser", "getCloudUser",
+		"listCloudUserDevices", "listCloudUserSessions", "revokeCloudDevice",
+		"revokeCloudSession", "disableCloudUser", "enableCloudUser", "getCloudAdminOperation",
+	} {
+		if !strings.Contains(raw, "operationId: "+operationID) {
+			t.Errorf("missing %s", operationID)
+		}
+	}
+	components := object(t, document["components"], "Cloud components")
+	schemes := object(t, components["securitySchemes"], "Cloud security schemes")
+	if object(t, schemes["mutualTLS"], "mutualTLS")["type"] != "mutualTLS" ||
+		object(t, schemes["serviceJWT"], "serviceJWT")["scheme"] != "bearer" {
+		t.Fatal("Cloud contract does not require mTLS plus service JWT")
+	}
+	schemas := object(t, components["schemas"], "Cloud schemas")
+	for _, schemaName := range []string{"User", "Device", "Session", "Operation"} {
+		properties := object(t, object(t, schemas[schemaName], schemaName)["properties"], schemaName+" properties")
+		for _, forbidden := range []string{"email", "phone", "identity_ciphertext", "token", "public_key"} {
+			if _, present := properties[forbidden]; present {
+				t.Errorf("%s exposes %s", schemaName, forbidden)
+			}
+		}
+	}
+	walkReferences(t, document, document, "#")
+}
+
 func assertSessionAndCSRF(t *testing.T, operation map[string]any, path string) {
 	t.Helper()
 	security, ok := operation["security"].([]any)
