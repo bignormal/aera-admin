@@ -14,6 +14,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/config"
 	"github.com/bignormal/aera-admin/internal/httpapi"
 	"github.com/bignormal/aera-admin/internal/store"
+	"github.com/bignormal/aera-admin/internal/webui"
 )
 
 const (
@@ -48,7 +49,7 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 	}
 	defer func() { _ = redisStore.Close() }()
 
-	handler := httpapi.New(httpapi.Dependencies{PostgreSQL: postgres, Redis: redisStore})
+	handler := httpapi.New(httpapi.Dependencies{PostgreSQL: postgres, Redis: redisStore, Web: webui.EmbeddedHandler()})
 	server := newHTTPServer(settings.ListenAddr, handler)
 	serveResult := make(chan error, 1)
 	go func() {

@@ -1,0 +1,243 @@
+:root {
+  color: #182230;
+  background: #f5f7fb;
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 1080px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.admin-shell {
+  min-height: 100vh;
+}
+
+.admin-sider {
+  position: sticky !important;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  box-shadow: 8px 0 24px rgb(5 12 24 / 8%);
+}
+
+.admin-brand {
+  display: flex;
+  height: 68px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  color: #fff;
+}
+
+.admin-brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #2e8bff, #625df5);
+  box-shadow: 0 8px 20px rgb(22 119 255 / 32%);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.admin-brand-copy,
+.admin-operator {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.admin-brand-copy strong {
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.admin-brand-copy small,
+.admin-operator small {
+  margin-top: 3px;
+  color: #8996ad;
+  font-size: 11px;
+}
+
+.admin-environment {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 6px;
+  color: #9aa7bc;
+  background: rgb(255 255 255 / 3%);
+  font-size: 12px;
+}
+
+.admin-environment-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #35c68f;
+  box-shadow: 0 0 0 4px rgb(53 198 143 / 12%);
+}
+
+.admin-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid #e9edf3;
+  line-height: normal;
+}
+
+.admin-global-search {
+  width: 360px;
+  background: #f6f8fb;
+}
+
+.admin-operator strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.admin-context-bar {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid #e9edf3;
+  background: #fff;
+  font-size: 12px;
+}
+
+.admin-tabs {
+  height: 38px;
+  padding: 5px 20px 0;
+  border-bottom: 1px solid #e3e8ef;
+  background: #fff;
+}
+
+.admin-tab {
+  display: inline-flex;
+  height: 33px;
+  align-items: center;
+  padding: 0 15px;
+  border: 1px solid #e3e8ef;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  color: #475467;
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.admin-tab-active {
+  position: relative;
+  color: #1677ff;
+  background: #fff;
+}
+
+.admin-tab-active::after {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  left: -1px;
+  height: 2px;
+  background: #fff;
+  content: "";
+}
+
+.admin-content {
+  min-height: calc(100vh - 138px);
+  padding: 18px 20px 24px;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.page-heading .ant-typography {
+  margin-top: 0;
+  margin-bottom: 4px;
+}
+
+.foundation-grid {
+  margin-top: 14px;
+}
+
+.foundation-card {
+  height: 100%;
+}
+
+.foundation-card .ant-card-body {
+  position: relative;
+  display: flex;
+  min-height: 158px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.foundation-card h5.ant-typography {
+  max-width: calc(100% - 34px);
+  min-height: 44px;
+  margin: 8px 0 12px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.foundation-icon {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 8px;
+  color: #1677ff;
+  background: #edf5ff;
+  font-size: 17px;
+}
+
+.delivery-card {
+  margin-top: 14px;
+}
+
+@media (max-width: 1280px) {
+  .admin-global-search {
+    width: 280px;
+  }
+}

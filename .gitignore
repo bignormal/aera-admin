@@ -2,15 +2,18 @@
 .idea/
 .vscode/
 .superpowers/
+.playwright-cli/
 
 node_modules/
 dist/
 coverage/
 .vite/
+internal/webui/dist/
 
 bin/
 tmp/
 *.log
+/aera-admin
 
 .env
 .env.*

@@ -251,7 +251,9 @@ git commit -m "feat: bootstrap Aera Admin service"
 - Create: `internal/webui/handler.go`
 - Create: `internal/webui/handler_test.go`
 - Create: `internal/webui/assets.go`
-- Create: `internal/webui/dist/.gitkeep`
+- Create: `internal/webui/assets_development.go`
+- Create: `internal/webui/assets_release.go`
+- Create: `internal/webui/fallback/index.html`
 
 **Interfaces:**
 - Produces: `webui.New(fs.FS) http.Handler` for embedded SPA files.
@@ -324,6 +326,10 @@ Expected: Vitest PASS and Vite emits `internal/webui/dist`.
 Run: `go test ./internal/webui`
 
 Expected: PASS.
+
+Run after `pnpm build`: `go test -tags release ./internal/webui ./cmd/aera-admin`
+
+Expected: PASS with Vite output embedded from ignored `internal/webui/dist` files. Normal tests embed the checked-in fallback page, so Vite builds never modify tracked files.
 
 - [ ] **Step 6: Commit**
 
@@ -992,11 +998,11 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add web api/openapi/admin.yaml internal/webui/assets.go internal/webui/dist/.gitkeep
+git add web api/openapi/admin.yaml internal/webui/assets.go internal/webui/assets_development.go internal/webui/assets_release.go internal/webui/fallback
 git commit -m "feat: add administrator security console"
 ```
 
-Generated files under `internal/webui/dist` remain ignored except `.gitkeep`; Docker and release builds run Vite before `go build`, so the embedded assets are reproducible and not committed.
+Generated files under `internal/webui/dist` remain ignored. Docker and release builds run Vite before `go build -tags release`, so the embedded assets are reproducible and not committed.
 
 ### Task 10: End-to-End Security Acceptance and Packaging
 
@@ -1050,7 +1056,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/internal/webui/dist ./internal/webui/dist
-RUN CGO_ENABLED=0 go build -trimpath -o /out/aera-admin ./cmd/aera-admin
+RUN CGO_ENABLED=0 go build -tags release -trimpath -o /out/aera-admin ./cmd/aera-admin
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=go /out/aera-admin /aera-admin
