@@ -1,0 +1,31 @@
+name: aera-admin-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: aera_admin
+      POSTGRES_USER: aera_admin
+      POSTGRES_PASSWORD: aera-admin-dev-only
+    ports:
+      - "${AERA_ADMIN_POSTGRES_BIND:-127.0.0.1:55435}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aera_admin -d aera_admin"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - aera-admin-postgres-dev:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "${AERA_ADMIN_REDIS_BIND:-127.0.0.1:56382}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  aera-admin-postgres-dev:

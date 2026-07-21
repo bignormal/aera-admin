@@ -19,6 +19,7 @@ import (
 
 const (
 	dependencyTimeout = 5 * time.Second
+	migrationTimeout  = 30 * time.Second
 	shutdownTimeout   = 10 * time.Second
 )
 
@@ -36,14 +37,22 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
-	connectCtx, cancelConnect := context.WithTimeout(ctx, dependencyTimeout)
-	defer cancelConnect()
-	postgres, err := store.OpenPostgreSQL(connectCtx, settings.DatabaseURL)
+	postgresCtx, cancelPostgres := context.WithTimeout(ctx, dependencyTimeout)
+	postgres, err := store.OpenPostgreSQL(postgresCtx, settings.DatabaseURL)
+	cancelPostgres()
 	if err != nil {
 		return err
 	}
 	defer postgres.Close()
-	redisStore, err := store.OpenRedis(connectCtx, store.RedisConfig{Address: settings.RedisAddr})
+	migrateCtx, cancelMigrate := context.WithTimeout(ctx, migrationTimeout)
+	if err := store.Migrate(migrateCtx, postgres); err != nil {
+		cancelMigrate()
+		return err
+	}
+	cancelMigrate()
+	redisCtx, cancelRedis := context.WithTimeout(ctx, dependencyTimeout)
+	redisStore, err := store.OpenRedis(redisCtx, store.RedisConfig{Address: settings.RedisAddr})
+	cancelRedis()
 	if err != nil {
 		return err
 	}
