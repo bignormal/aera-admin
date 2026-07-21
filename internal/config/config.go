@@ -10,6 +10,9 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -20,6 +23,18 @@ type LookupEnv func(string) (string, bool)
 type KeyRing struct {
 	ActiveKeyID string
 	Keys        map[string][]byte
+}
+
+type CloudAdminConfig struct {
+	Enabled           bool
+	BaseURL           string
+	CAFile            string
+	ClientCertFile    string
+	ClientKeyFile     string
+	JWTSigningKeyFile string
+	JWTIssuer         string
+	JWTSubject        string
+	Scopes            []string
 }
 
 type Config struct {
@@ -34,7 +49,14 @@ type Config struct {
 	TOTPEncryptionKeys     KeyRing
 	SessionHMACKey         []byte
 	CSRFHMACKey            []byte
+	OperationHMACKey       []byte
+	CloudAdmin             CloudAdminConfig
 }
+
+var (
+	serviceIdentityName = regexp.MustCompile(`^[a-z][a-z0-9._-]{2,63}$`)
+	scopeName           = regexp.MustCompile(`^[a-z][a-z0-9:_-]{2,63}$`)
+)
 
 func Load(lookup LookupEnv) (Config, error) {
 	if lookup == nil {
@@ -96,11 +118,89 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	operationKey, err := decodeRequiredKey(lookup, "AERA_ADMIN_OPERATION_HMAC_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	cloudAdmin, err := loadCloudAdmin(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		Environment: environment, ListenAddr: listenAddr, PublicURL: publicURL,
 		DatabaseURL: databaseURL, RedisAddr: redisAddr, TrustedProxyCIDRs: trustedProxyCIDRs,
 		IdentityEncryptionKeys: identityEncryption, IdentityLookupKeys: identityLookup,
 		TOTPEncryptionKeys: totpEncryption, SessionHMACKey: sessionKey, CSRFHMACKey: csrfKey,
+		OperationHMACKey: operationKey, CloudAdmin: cloudAdmin,
+	}, nil
+}
+
+func loadCloudAdmin(lookup LookupEnv) (CloudAdminConfig, error) {
+	raw, ok := lookup("AERA_ADMIN_CLOUD_ENABLED")
+	if !ok || (raw != "true" && raw != "false") {
+		return CloudAdminConfig{}, errors.New("AERA_ADMIN_CLOUD_ENABLED must be true or false")
+	}
+	if raw == "false" {
+		return CloudAdminConfig{}, nil
+	}
+
+	baseURL, err := required(lookup, "AERA_ADMIN_CLOUD_BASE_URL")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return CloudAdminConfig{}, errors.New("AERA_ADMIN_CLOUD_BASE_URL must be an HTTPS origin")
+	}
+	parsed.Path = ""
+
+	absoluteFile := func(name string) (string, error) {
+		value, requiredErr := required(lookup, name)
+		if requiredErr != nil {
+			return "", requiredErr
+		}
+		if !filepath.IsAbs(value) || filepath.Clean(value) != value {
+			return "", fmt.Errorf("%s must be an absolute clean path", name)
+		}
+		return value, nil
+	}
+	caFile, err := absoluteFile("AERA_ADMIN_CLOUD_CA_FILE")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	certFile, err := absoluteFile("AERA_ADMIN_CLOUD_CLIENT_CERT_FILE")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	keyFile, err := absoluteFile("AERA_ADMIN_CLOUD_CLIENT_KEY_FILE")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	signingFile, err := absoluteFile("AERA_ADMIN_CLOUD_JWT_SIGNING_KEY_FILE")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	issuer, err := required(lookup, "AERA_ADMIN_CLOUD_JWT_ISSUER")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	subject, err := required(lookup, "AERA_ADMIN_CLOUD_JWT_SUBJECT")
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+	if !serviceIdentityName.MatchString(issuer) || !serviceIdentityName.MatchString(subject) {
+		return CloudAdminConfig{}, errors.New("Cloud JWT issuer and subject must be stable service identifiers")
+	}
+	scopes, err := parseStringSet(lookup, "AERA_ADMIN_CLOUD_SCOPES", 16, scopeName)
+	if err != nil {
+		return CloudAdminConfig{}, err
+	}
+
+	return CloudAdminConfig{
+		Enabled: true, BaseURL: parsed.String(), CAFile: caFile, ClientCertFile: certFile,
+		ClientKeyFile: keyFile, JWTSigningKeyFile: signingFile, JWTIssuer: issuer,
+		JWTSubject: subject, Scopes: scopes,
 	}, nil
 }
 
@@ -222,6 +322,30 @@ func decodeRequiredKey(lookup LookupEnv, environmentKey string) ([]byte, error) 
 		return nil, fmt.Errorf("%s must be base64-encoded and at least %d bytes", environmentKey, minimumKeyBytes)
 	}
 	return append([]byte(nil), key...), nil
+}
+
+func parseStringSet(lookup LookupEnv, name string, maximum int, pattern *regexp.Regexp) ([]string, error) {
+	raw, err := required(lookup, name)
+	if err != nil {
+		return nil, err
+	}
+	var values []string
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if err := decoder.Decode(&values); err != nil || ensureJSONEnd(decoder) != nil || len(values) == 0 || len(values) > maximum {
+		return nil, fmt.Errorf("%s must contain one bounded JSON array", name)
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !pattern.MatchString(value) || value == "*" {
+			return nil, fmt.Errorf("%s contains an invalid value", name)
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return nil, fmt.Errorf("%s contains a duplicate value", name)
+		}
+		seen[value] = struct{}{}
+	}
+	sort.Strings(values)
+	return values, nil
 }
 
 func ensureJSONEnd(decoder *json.Decoder) error {
