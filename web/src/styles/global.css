@@ -414,6 +414,88 @@ input {
   box-shadow: 0 4px 14px rgb(16 24 40 / 4%);
 }
 
+.approval-filter-card .filter-control {
+  min-height: 52px;
+  justify-content: center;
+}
+
+.approval-details .ant-descriptions-item-label {
+  width: 132px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.approval-details .ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.approval-timeline-title {
+  margin-top: 22px;
+}
+
+.approval-event {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.health-loading {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+}
+
+.health-card {
+  height: 100%;
+  border: 1px solid #e7ebf1;
+  box-shadow: 0 4px 14px rgb(16 24 40 / 3%);
+}
+
+.health-card > .ant-card-body {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+}
+
+.health-card-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 9px;
+  color: #d97706;
+  background: #fff7e6;
+  font-size: 18px;
+}
+
+.health-card-icon-ok {
+  color: #15803d;
+  background: #edf9f1;
+}
+
+.health-card-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.cloud-health-card {
+  margin-top: 12px;
+  border-color: #e2e8f0;
+}
+
+.cloud-health-card > .ant-card-head {
+  min-height: 46px;
+}
+
 .detail-drawer-grid {
   display: grid;
   grid-template-columns: minmax(120px, 0.4fr) minmax(220px, 1fr);

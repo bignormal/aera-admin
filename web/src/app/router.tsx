@@ -17,6 +17,8 @@ const AdministratorsPage = lazy(() => import('../pages/AdministratorsPage').then
 const RolesPage = lazy(() => import('../pages/RolesPage').then((module) => ({ default: module.RolesPage })));
 const CloudUsersPage = lazy(() => import('../pages/CloudUsersPage').then((module) => ({ default: module.CloudUsersPage })));
 const CloudDevicesPage = lazy(() => import('../pages/CloudDevicesPage').then((module) => ({ default: module.CloudDevicesPage })));
+const ApprovalsPage = lazy(() => import('../pages/ApprovalsPage').then((module) => ({ default: module.ApprovalsPage })));
+const SystemHealthPage = lazy(() => import('../pages/SystemHealthPage').then((module) => ({ default: module.SystemHealthPage })));
 
 function suspended(content: ReactNode) {
   return <Suspense fallback={<FullPageLoader />}>{content}</Suspense>;
@@ -49,7 +51,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'approvals',
-        element: <RequirePermission anyOf={['account_lifecycle.initiate', 'account_lifecycle.approve']}><ModulePlaceholderPage title="处置审批" /></RequirePermission>,
+        element: <RequirePermission anyOf={['account_lifecycle.initiate', 'account_lifecycle.approve']}>{suspended(<ApprovalsPage />)}</RequirePermission>,
       },
       {
         path: 'audit',
@@ -57,7 +59,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'system/health',
-        element: <RequirePermission permission="service_health.read"><ModulePlaceholderPage title="服务健康" /></RequirePermission>,
+        element: <RequirePermission permission="service_health.read">{suspended(<SystemHealthPage />)}</RequirePermission>,
       },
     ],
   },
