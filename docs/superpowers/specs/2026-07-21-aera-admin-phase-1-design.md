@@ -147,18 +147,20 @@ invited -> active -> suspended
 - 系统不提供默认账号或默认密码。
 - 受限 CLI 创建首两名超级管理员邀请。
 - 第二名超级管理员激活前，只开放管理员初始化能力；用户处置和 MFA 重置保持锁定。
-- 邀请令牌一次性使用、短期有效，并且数据库只保存令牌哈希。
+- 邀请令牌一次性使用、24 小时有效，并且数据库只保存令牌哈希。
 - 首次激活设置密码、绑定 TOTP，并生成一次性恢复码。
 - 密码至少 12 位，允许密码管理器，不因固定周期无条件强制更换。
 - 密码使用版本化 Argon2id 参数保存。
 - TOTP 密钥使用部署密钥或 KMS 加密；恢复码只保存哈希。
 - 登录先校验密码，再校验 TOTP；TOTP 未通过前不创建管理会话。
+- 每个 TOTP 时间步只能成功使用一次；服务端保存最近接受的时间步，阻止同一码重放。
 - 登录错误统一返回凭证无效，避免管理员账号枚举。
 - 失败按账号和 IP 双维度限速，并采用渐进延迟和临时锁定。
 
 ### 5.3 管理会话
 
-- Cookie：`Secure`、`HttpOnly`、`SameSite=Strict`。
+- 管理会话使用不含凭证内容的随机 Token，数据库只保存 Token 哈希。
+- Cookie 名使用 `__Host-aera_admin_session`，并设置 `Secure`、`HttpOnly`、`SameSite=Strict` 和 `Path=/`，不设置 `Domain`。
 - 所有修改请求同时校验 CSRF Token 和 Origin。
 - 会话空闲 30 分钟过期，绝对生命周期 8 小时。
 - 密码、MFA、角色或账号状态变化后撤销全部旧会话。
@@ -285,9 +287,12 @@ not_started -> executing -> succeeded | failed | conflict
 
 - 只有 `operator` 可以发起。
 - 只有非发起人的 `super_admin` 可以批准或驳回。
+- 只有原发起人可以在 `pending_review` 状态撤回申请；进入审批或执行后不能撤回。
 - 申请保存目标用户 ID、脱敏快照、原因、预期 Cloud revision 和 24 小时有效期。
 - 审批人不能编辑申请内容；需要修改时重新发起。
 - 过期、目标状态变化或 revision 冲突时不能执行。
+- 禁用只允许作用于 `active` 用户；`pending_deletion`、已禁用或已完成删除的用户返回状态冲突。
+- 恢复只允许作用于 `disabled AND administratively_disabled=true AND deletion_finalized_at IS NULL` 的用户。
 - 禁用应继续复用 Cloud 现有事务：禁用用户和个人空间，撤销设备、会话和离线授权记录。
 - 恢复只恢复账号和个人空间的登录资格，不恢复旧会话、设备或离线授权。
 - 已签发且当前离线的本地授权不能被伪装成瞬时断开；页面必须显示“Cloud 已禁用，离线设备待联机校验/本地授权到期”。
@@ -353,7 +358,9 @@ GET  /internal/admin/v1/operations/{operationID}
 - JSON、UTF-8、UTC RFC3339 时间。
 - 列表采用稳定游标分页，不使用高偏移分页。
 - 所有响应设置 `Cache-Control: no-store`。
-- 所有修改接口要求 CSRF Token、`Idempotency-Key` 和原因码。
+- 所有浏览器状态修改接口要求有效管理会话、CSRF Token 和匹配的 Origin。
+- 所有业务处置接口要求 `Idempotency-Key` 和标准原因码；登录、MFA 和查询接口不要求原因码。
+- Cloud Internal API 同时要求受信 mTLS 客户端证书和短期服务令牌；只有其中一项时拒绝请求。
 - 使用稳定机器错误码，不把数据库或加密组件的原始错误发给浏览器。
 - Cloud 修改接口要求预期 `administrative_revision`。
 - OpenAPI 文档是 Admin 与 Cloud 的契约来源，CI 运行契约测试。
@@ -485,6 +492,7 @@ reason_codes
 ## 14. 部署与密钥边界
 
 - React 静态资源嵌入 Admin Go 二进制，同源提供页面与 API。
+- 页面响应设置严格 CSP、`frame-ancestors 'none'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 和 HSTS；不允许第三方脚本。
 - Admin 入口位于公司 VPN、Zero Trust 网关或固定出口白名单之后。
 - Admin BFF、Admin PostgreSQL 和 Redis 位于内部网络。
 - Cloud Internal Admin API 使用独立内部端口和私有网络策略。
@@ -583,4 +591,3 @@ reason_codes
 - 本地验证、提交、推送、部署和发布是不同状态，交付报告必须分别说明。
 - Admin 开发和验收完成后，推送到用户指定的 `bignormal/aera-admin`。
 - 不提交 `.superpowers/` 视觉协作临时文件、密钥、环境变量或本地数据库。
-
