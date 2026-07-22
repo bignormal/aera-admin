@@ -3,6 +3,7 @@
 .vscode/
 .superpowers/
 .playwright-cli/
+.worktrees/
 
 node_modules/
 dist/
