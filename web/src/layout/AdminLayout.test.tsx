@@ -60,6 +60,7 @@ describe('AdminLayout', () => {
       '设备与会话',
       '处置审批',
       '审计记录',
+      '系统设置',
       '服务健康',
     ]) {
       expect(menu.getByText(label)).toBeInTheDocument();
@@ -75,5 +76,13 @@ describe('AdminLayout', () => {
     expect(menu.queryByText('内部管理员')).not.toBeInTheDocument();
     expect(menu.queryByText('角色与权限')).not.toBeInTheDocument();
     expect(menu.getByText('用户与访问')).toBeInTheDocument();
+    expect(menu.queryByText('系统设置')).not.toBeInTheDocument();
+  });
+
+  it('renders system settings navigation for the read-only auditor role', async () => {
+    renderLayout('auditor');
+
+    const menu = within(await screen.findByRole('menu'));
+    expect(menu.getByText('系统设置')).toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ const CloudUsersPage = lazy(() => import('../pages/CloudUsersPage').then((module
 const CloudDevicesPage = lazy(() => import('../pages/CloudDevicesPage').then((module) => ({ default: module.CloudDevicesPage })));
 const ApprovalsPage = lazy(() => import('../pages/ApprovalsPage').then((module) => ({ default: module.ApprovalsPage })));
 const AuditPage = lazy(() => import('../pages/AuditPage').then((module) => ({ default: module.AuditPage })));
+const SystemSettingsPage = lazy(() => import('../pages/SystemSettingsPage').then((module) => ({ default: module.SystemSettingsPage })));
 const SystemHealthPage = lazy(() => import('../pages/SystemHealthPage').then((module) => ({ default: module.SystemHealthPage })));
 
 function suspended(content: ReactNode) {
@@ -56,6 +57,10 @@ const routes: RouteObject[] = [
       {
         path: 'audit',
         element: <RequirePermission anyOf={['audit.read_full', 'audit.read_own']}>{suspended(<AuditPage />)}</RequirePermission>,
+      },
+      {
+        path: 'system/settings',
+        element: <RequirePermission permission="system_settings.read">{suspended(<SystemSettingsPage />)}</RequirePermission>,
       },
       {
         path: 'system/health',

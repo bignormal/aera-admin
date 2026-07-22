@@ -24,6 +24,9 @@ describe('CloudDevicesPage', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === '/api/v1/me') return jsonResponse(sessionFor('support'), 200);
+        if (url === '/api/v1/system/reason-codes?usage=device') {
+          return jsonResponse({ items: [reason('lost_device', 'device', '设备遗失')], settings_revision: 4 }, 200);
+        }
         if (url.endsWith('/devices?limit=100')) return jsonResponse({ items: [activeDevice()] }, 200);
         if (url.endsWith('/sessions?limit=100')) return jsonResponse({ items: [] }, 200);
         if (url.endsWith('/revoke')) {
@@ -147,4 +150,16 @@ function sessionFor(role: AdminRole): SessionDocument {
 
 function jsonResponse(value: unknown, status: number): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function reason(code: string, category: string, label: string) {
+  return {
+    code,
+    category,
+    label,
+    active: true,
+    revision: 1,
+    created_at: '2026-07-22T08:00:00Z',
+    updated_at: '2026-07-22T08:00:00Z',
+  };
 }

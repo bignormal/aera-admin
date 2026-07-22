@@ -127,6 +127,12 @@ describe('AdministratorsPage', () => {
           }
           return replay;
         }
+        if (path === '/api/v1/system/reason-codes?usage=session') {
+          return new Response(JSON.stringify({
+            items: [reason('suspected_compromise', 'security', '疑似凭证泄露')],
+            settings_revision: 4,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
         if (path === '/api/v1/auth/step-up') {
           protectedRequests.push({
             path,
@@ -149,6 +155,8 @@ describe('AdministratorsPage', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: '撤销会话' }));
+    await user.click(await screen.findByRole('combobox', { name: '标准原因' }));
+    await user.click(await screen.findByText('疑似凭证泄露'));
     await user.click(screen.getByRole('button', { name: '确认执行' }));
     await user.type(await screen.findByLabelText('二次验证动态验证码'), '123456');
     await user.click(screen.getByRole('button', { name: '验证并继续' }));
@@ -201,6 +209,12 @@ describe('AdministratorsPage', () => {
             expires_at: '2026-07-21T11:00:00Z',
           }), { status: 201, headers: { 'Content-Type': 'application/json' } });
         }
+        if (path === '/api/v1/system/reason-codes?usage=administrator') {
+          return new Response(JSON.stringify({
+            items: [reason('staff_change', 'administrator', '人员或职责变更')],
+            settings_revision: 4,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
         throw new Error(`unexpected request: ${path}`);
       }),
     );
@@ -221,6 +235,8 @@ describe('AdministratorsPage', () => {
     await user.click(await screen.findByRole('button', { name: /邀请管理员/ }));
     await user.type(screen.getByLabelText('邀请邮箱'), 'support@example.com');
     await user.type(screen.getByLabelText('显示名称'), '客服人员');
+    await user.click(await screen.findByRole('combobox', { name: '标准原因' }));
+    await user.click(await screen.findByText('人员或职责变更'));
     await user.click(screen.getByRole('button', { name: /生成一次性激活链接/ }));
 
     const oneTimeLink = await screen.findByText('https://admin.example.test/activate#token=one-time-secret');
@@ -230,3 +246,15 @@ describe('AdministratorsPage', () => {
     expect(screen.getByText('https://admin.example.test/activate#token=one-time-secret')).toBeVisible();
   });
 });
+
+function reason(code: string, category: string, label: string) {
+  return {
+    code,
+    category,
+    label,
+    active: true,
+    revision: 1,
+    created_at: '2026-07-22T08:00:00Z',
+    updated_at: '2026-07-22T08:00:00Z',
+  };
+}

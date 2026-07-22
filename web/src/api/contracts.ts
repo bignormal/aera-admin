@@ -32,6 +32,8 @@ export const permissions = [
   'audit.read_full',
   'audit.read_own',
   'service_health.read',
+  'system_settings.read',
+  'system_settings.manage',
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -49,6 +51,8 @@ export const rolePermissions: Record<AdminRole, readonly Permission[]> = {
     'account_lifecycle.approve',
     'audit.read_full',
     'service_health.read',
+    'system_settings.read',
+    'system_settings.manage',
   ],
   developer: ['cloud_user.read_technical', 'cloud_device.read', 'service_health.read'],
   operator: [
@@ -70,7 +74,7 @@ export const rolePermissions: Record<AdminRole, readonly Permission[]> = {
     'audit.read_own',
   ],
   finance: [],
-  auditor: ['administrator.read', 'audit.read_full', 'service_health.read'],
+  auditor: ['administrator.read', 'audit.read_full', 'service_health.read', 'system_settings.read'],
 };
 
 export function isAdminRole(value: unknown): value is AdminRole {
@@ -284,6 +288,66 @@ export interface ReasonInput {
   reason_code: string;
   ticket_reference: string;
   note: string;
+}
+
+export type ReasonCategory = 'administrator' | 'session' | 'device' | 'account' | 'security';
+export type ReasonUsage = 'administrator' | 'account' | 'device' | 'session' | 'settings';
+
+export interface ReasonCode {
+  code: string;
+  category: ReasonCategory;
+  label: string;
+  active: boolean;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReasonCodePage {
+  items: ReasonCode[];
+  settings_revision: number;
+}
+
+export interface SecurityPolicy {
+  session_idle_minutes: number;
+  session_absolute_hours: number;
+  audit_retention_days: number;
+  revision: number;
+  updated_by_admin_id: string | null;
+  updated_at: string;
+}
+
+export interface UpdateSecurityPolicyInput extends ReasonInput {
+  expected_revision: number;
+  session_idle_minutes: number;
+  session_absolute_hours: number;
+  audit_retention_days: number;
+}
+
+export interface SecurityPolicyMutationResult {
+  operation_id: string;
+  policy: SecurityPolicy;
+  sessions_revoked: boolean;
+}
+
+export interface CreateReasonCodeInput extends ReasonInput {
+  code: string;
+  category: ReasonCategory;
+  label: string;
+  expected_settings_revision: number;
+}
+
+export interface UpdateReasonCodeInput extends ReasonInput {
+  expected_settings_revision: number;
+  expected_reason_revision: number;
+  label: string;
+  active: boolean;
+}
+
+export interface ReasonCodeMutationResult {
+  operation_id: string;
+  reason: ReasonCode;
+  settings_revision: number;
 }
 
 export type AuditOutcome = 'success' | 'failure' | 'denied';

@@ -1,39 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button, Form, Input, Select } from 'antd';
+import { Alert, Button, Form, Input, Select } from 'antd';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
-import type { ReasonInput } from '../api/contracts';
-
-const options = {
-  account: [
-    { value: 'customer_request', label: '客户请求' },
-    { value: 'policy_violation', label: '违反使用政策' },
-    { value: 'account_recovery', label: '账号恢复' },
-    { value: 'suspected_compromise', label: '疑似凭证泄露' },
-    { value: 'security_incident', label: '安全事件处置' },
-  ],
-  device: [
-    { value: 'lost_device', label: '设备遗失' },
-    { value: 'device_replacement', label: '设备更换' },
-    { value: 'suspected_compromise', label: '疑似凭证泄露' },
-    { value: 'security_incident', label: '安全事件处置' },
-  ],
-  session: [
-    { value: 'session_cleanup', label: '会话安全清理' },
-    { value: 'suspected_compromise', label: '疑似凭证泄露' },
-    { value: 'security_incident', label: '安全事件处置' },
-  ],
-} as const;
-
-export type ReasonCategory = keyof typeof options;
+import { useReasonCodes } from '../api/settings';
+import type { ReasonInput, ReasonUsage } from '../api/contracts';
 
 const ticketPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const sensitiveText =
   /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?86[- ]?)?1[3-9]\d{9}|bearer\s+\S+|(?:password|secret|token|cookie)\s*[:=]\s*\S{6,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|-----BEGIN [A-Z ]*PRIVATE KEY-----)/iu;
 
-function schemaFor(category: ReasonCategory) {
-  const allowed = new Set<string>(options[category].map((item) => item.value));
+function schemaFor(allowed: ReadonlySet<string>) {
   return z
     .object({
       reason_code: z.string().refine((value) => allowed.has(value), '请选择标准原因'),
@@ -64,14 +41,17 @@ function schemaFor(category: ReasonCategory) {
 }
 
 interface ReasonFormProps {
-  category: ReasonCategory;
+  usage: ReasonUsage;
   submitLabel: string;
   pending?: boolean;
   onSubmit: (value: ReasonInput) => void | Promise<void>;
 }
 
-export function ReasonForm({ category, submitLabel, pending = false, onSubmit }: ReasonFormProps) {
-  const schema = schemaFor(category);
+export function ReasonForm({ usage, submitLabel, pending = false, onSubmit }: ReasonFormProps) {
+  const catalog = useReasonCodes(usage);
+  const activeReasons = (catalog.data?.items ?? []).filter((reason) => reason.active);
+  const allowed = new Set(activeReasons.map((reason) => reason.code));
+  const schema = schemaFor(allowed);
   const {
     control,
     handleSubmit,
@@ -80,6 +60,9 @@ export function ReasonForm({ category, submitLabel, pending = false, onSubmit }:
     resolver: zodResolver(schema),
     defaultValues: { reason_code: '', ticket_reference: '', note: '' },
   });
+  const unavailable = catalog.isError;
+  const empty = catalog.isSuccess && activeReasons.length === 0;
+  const disabled = pending || catalog.isPending || unavailable || empty;
 
   return (
     <Form
@@ -88,6 +71,12 @@ export function ReasonForm({ category, submitLabel, pending = false, onSubmit }:
       layout="vertical"
       onFinish={handleSubmit(onSubmit)}
     >
+      {unavailable && (
+        <Alert type="error" showIcon message="标准原因暂时不可用，当前操作已禁止提交" />
+      )}
+      {empty && (
+        <Alert type="warning" showIcon message="暂无适用于此操作的有效标准原因，当前操作已禁止提交" />
+      )}
       <Controller
         control={control}
         name="reason_code"
@@ -98,7 +87,14 @@ export function ReasonForm({ category, submitLabel, pending = false, onSubmit }:
             validateStatus={errors.reason_code ? 'error' : undefined}
             help={errors.reason_code?.message}
           >
-            <Select {...field} id="reason-code" options={[...options[category]]} />
+            <Select
+              {...field}
+              id="reason-code"
+              loading={catalog.isPending}
+              disabled={catalog.isPending || unavailable || empty}
+              virtual={false}
+              options={activeReasons.map((reason) => ({ value: reason.code, label: reason.label }))}
+            />
           </Form.Item>
         )}
       />
@@ -134,7 +130,7 @@ export function ReasonForm({ category, submitLabel, pending = false, onSubmit }:
           </Form.Item>
         )}
       />
-      <Button type="primary" htmlType="submit" danger loading={pending}>
+      <Button type="primary" htmlType="submit" danger loading={pending} disabled={disabled}>
         {submitLabel}
       </Button>
     </Form>

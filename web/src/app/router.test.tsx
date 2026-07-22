@@ -217,6 +217,56 @@ describe('application router', () => {
     expect(await screen.findByText('Cloud 管理链路')).toBeVisible();
   });
 
+  it('renders the read-only system settings console for auditors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path === '/api/v1/me') return sessionResponse('auditor');
+        if (path === '/api/v1/system/settings') {
+          return jsonResponse({
+            session_idle_minutes: 30,
+            session_absolute_hours: 12,
+            audit_retention_days: 730,
+            revision: 4,
+            updated_by_admin_id: null,
+            updated_at: '2026-07-22T08:00:00Z',
+          });
+        }
+        if (path === '/api/v1/system/reason-codes?include_inactive=true') {
+          return jsonResponse({ items: [], settings_revision: 4 });
+        }
+        throw new Error(`unexpected request: ${path}`);
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/system/settings'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: '系统安全设置' })).toBeVisible();
+    expect(screen.getByText('只读模式')).toBeVisible();
+  });
+
+  it('rejects support direct access to system settings', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sessionResponse('support')));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/system/settings'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('无权访问此页面')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '系统安全设置' })).not.toBeInTheDocument();
+  });
+
   it.each([
     ['support', '/system/health', '服务健康'],
     ['finance', '/approvals', '处置审批'],

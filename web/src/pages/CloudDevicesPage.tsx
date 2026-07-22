@@ -411,7 +411,7 @@ export function CloudDevicesPage() {
         {actionError && <Alert className="page-alert" type="error" showIcon message={actionError} />}
         {target && (
           <ReasonForm
-            category={target.kind}
+            usage={target.kind}
             submitLabel="确认撤销"
             pending={revoke.isPending}
             onSubmit={submitRevoke}

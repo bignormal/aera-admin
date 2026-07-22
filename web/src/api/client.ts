@@ -116,6 +116,19 @@ export function putJSON<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 }
 
+export async function putIdempotentJSON<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey: string,
+): Promise<T> {
+  if (!idempotencyKeyPattern.test(idempotencyKey)) throw new Error('Invalid idempotency key');
+  return request<T>(path, {
+    method: 'PUT',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
 export function listAuditEvents(query: URLSearchParams): Promise<AuditEventPage> {
   const encoded = query.toString();
   return request<AuditEventPage>(`/audit-events${encoded ? `?${encoded}` : ''}`);

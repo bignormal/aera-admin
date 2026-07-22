@@ -1,6 +1,7 @@
 import {
   AuditOutlined,
   CheckSquareOutlined,
+  ControlOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   DesktopOutlined,
@@ -37,6 +38,7 @@ const navigation: NavigationItem[] = [
   { key: '/cloud/devices', label: '设备与会话', icon: <DesktopOutlined />, permissions: ['cloud_device.read'] },
   { key: '/approvals', label: '处置审批', icon: <CheckSquareOutlined />, permissions: ['account_lifecycle.initiate', 'account_lifecycle.approve'] },
   { key: '/audit', label: '审计记录', icon: <AuditOutlined />, permissions: ['audit.read_full', 'audit.read_own'] },
+  { key: '/system/settings', label: '系统设置', icon: <ControlOutlined />, permissions: ['system_settings.read'] },
   { key: '/system/health', label: '服务健康', icon: <SettingOutlined />, permissions: ['service_health.read'] },
 ];
 

@@ -438,7 +438,7 @@ export function CloudUsersPage() {
         />
         {lifecycleError && <Alert className="page-alert" showIcon type="error" message={lifecycleError} />}
         <ReasonForm
-          category="account"
+          usage="account"
           submitLabel="提交审批申请"
           pending={lifecyclePending}
           onSubmit={createLifecycleRequest}

@@ -45,6 +45,7 @@ function SessionProbe() {
       <output aria-label="当前会话">{auth.session?.display_name ?? 'signed-out'}</output>
       <button type="button" onClick={() => void auth.establishSession(session('新会话'))}>建立会话</button>
       <button type="button" onClick={() => void auth.refreshSession().catch(() => undefined)}>刷新会话</button>
+      <button type="button" onClick={() => void auth.clearSession()}>清除会话</button>
       <button type="button" onClick={() => void auth.logout().catch(() => undefined)}>退出</button>
     </div>
   );
@@ -52,11 +53,12 @@ function SessionProbe() {
 
 function renderProvider() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider><SessionProbe /></AuthProvider>
     </QueryClientProvider>,
   );
+  return { ...result, queryClient };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -108,5 +110,24 @@ describe('AuthProvider session ordering', () => {
 
     await act(async () => refresh.resolve(jsonResponse(session('旧会话'))));
     expect(screen.getByLabelText('当前会话')).toHaveTextContent('signed-out');
+  });
+
+  it('removes every administrator-scoped query when the session is cleared', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse(session('现有会话')))));
+    const user = userEvent.setup();
+    const { queryClient } = renderProvider();
+    expect(await screen.findByText('现有会话')).toBeVisible();
+
+    const scopedKeys = [
+      ['approval-request', 'approval-1'],
+      ['admin-operation', 'operation-1'],
+      ['activation-preparation'],
+    ] as const;
+    for (const key of scopedKeys) queryClient.setQueryData(key, { secret: 'must-not-survive' });
+
+    await user.click(screen.getByRole('button', { name: '清除会话' }));
+
+    expect(screen.getByLabelText('当前会话')).toHaveTextContent('signed-out');
+    for (const key of scopedKeys) expect(queryClient.getQueryData(key)).toBeUndefined();
   });
 });

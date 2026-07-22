@@ -25,6 +25,8 @@ const permissionLabels: Record<Permission, { group: string; label: string }> = {
   'audit.read_full': { group: '审计', label: '查看完整审计' },
   'audit.read_own': { group: '审计', label: '查看本人操作审计' },
   'service_health.read': { group: '系统', label: '查看服务健康' },
+  'system_settings.read': { group: '系统设置', label: '查看安全策略与原因目录' },
+  'system_settings.manage': { group: '系统设置', label: '管理安全策略与原因目录' },
 };
 
 interface PermissionRow {
@@ -39,12 +41,12 @@ const rows: PermissionRow[] = permissions.map((permission) => ({
 }));
 
 const roleDescriptions: Record<AdminRole, string> = {
-  super_admin: '管理员安全、审批与平台级查看',
+  super_admin: '管理员安全、审批与系统策略管理',
   developer: '技术诊断与服务健康',
   operator: '日常运营处置的发起方',
   support: '用户、设备与会话支持',
   finance: '一期不授予安全控制台权限',
-  auditor: '只读管理员、审计与健康状态',
+  auditor: '只读管理员、审计、健康与系统设置',
 };
 
 export function RolesPage() {

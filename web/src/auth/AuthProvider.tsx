@@ -19,6 +19,7 @@ interface AuthContextValue {
   unavailable: boolean;
   establishSession: (session: SessionDocument) => Promise<void>;
   refreshSession: () => Promise<SessionDocument | null>;
+  clearSession: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -80,16 +81,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return result;
   }, [queryClient]);
 
+  const clearSession = useCallback(async () => {
+    await queryClient.cancelQueries();
+    setSessionCSRF(null);
+    queryClient.setQueryData(sessionQueryKey, null);
+    for (const key of [
+      'activation-preparation', 'administrators', 'admin-operation', 'approval-request',
+      'approval-requests', 'audit-events', 'cloud-users', 'cloud-user', 'cloud-user-devices',
+      'cloud-user-sessions', 'system-health', 'system-settings', 'reason-codes',
+    ]) {
+      queryClient.removeQueries({ queryKey: [key] });
+    }
+  }, [queryClient]);
+
   const logout = useCallback(async () => {
     try {
       await postJSON<{ status: string }>('/auth/logout', {});
     } finally {
-      await queryClient.cancelQueries({ queryKey: sessionQueryKey });
-      setSessionCSRF(null);
-      queryClient.setQueryData(sessionQueryKey, null);
-      queryClient.removeQueries({ queryKey: ['administrators'] });
+      await clearSession();
     }
-  }, [queryClient]);
+  }, [clearSession]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -98,9 +109,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       unavailable: sessionQuery.isError,
       establishSession,
       refreshSession,
+      clearSession,
       logout,
     }),
-    [establishSession, logout, refreshSession, session, sessionQuery.isError, sessionQuery.isPending],
+    [clearSession, establishSession, logout, refreshSession, session, sessionQuery.isError, sessionQuery.isPending],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

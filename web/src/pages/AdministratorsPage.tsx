@@ -27,6 +27,7 @@ import { Controller, type Control, type FieldErrors, type FieldValues, type Path
 import { z } from 'zod';
 
 import { APIError, postJSON, putJSON, request } from '../api/client';
+import { useReasonCodes } from '../api/settings';
 import {
   hasPermission,
   roleLabels,
@@ -35,19 +36,11 @@ import {
   type Administrator,
   type AdministratorList,
   type InvitationResult,
+  type ReasonCode,
 } from '../api/contracts';
 import { useAuth } from '../auth/AuthProvider';
 import { StepUpModal } from '../auth/StepUpModal';
 import { copySensitiveText } from '../security/clipboard';
-
-const reasonOptions = [
-  { value: 'staff_change', label: '人员或职责变更' },
-  { value: 'access_review', label: '访问权限复核' },
-  { value: 'mfa_reset', label: '管理员 MFA 重置' },
-  { value: 'account_suspension', label: '管理员账号暂停' },
-  { value: 'suspected_compromise', label: '疑似凭证泄露' },
-  { value: 'security_incident', label: '安全事件处置' },
-] as const;
 
 const reasonFields = {
   reasonCode: z.string().min(1, '请选择标准原因'),
@@ -102,17 +95,42 @@ interface ReasonValues {
   note: string;
 }
 
-function ReasonControls<T extends FieldValues & ReasonValues>({ control, errors }: { control: Control<T>; errors: FieldErrors<T> }) {
+function ReasonControls<T extends FieldValues & ReasonValues>({
+  control,
+  errors,
+  reasons,
+  loading,
+  unavailable,
+}: {
+  control: Control<T>;
+  errors: FieldErrors<T>;
+  reasons: ReasonCode[];
+  loading: boolean;
+  unavailable: boolean;
+}) {
   const reasonError = errors.reasonCode?.message as string | undefined;
   const ticketError = errors.ticketReference?.message as string | undefined;
   const noteError = errors.note?.message as string | undefined;
   return (
     <>
+      {unavailable && <Alert type="error" showIcon message="标准原因暂时不可用，当前操作已禁止提交" />}
+      {!loading && !unavailable && reasons.length === 0 && (
+        <Alert type="warning" showIcon message="暂无适用于此操作的有效标准原因，当前操作已禁止提交" />
+      )}
       <Form.Item label="标准原因" validateStatus={reasonError ? 'error' : undefined} help={reasonError}>
         <Controller
           name={'reasonCode' as Path<T>}
           control={control}
-          render={({ field }) => <Select {...field} aria-label="标准原因" options={[...reasonOptions]} />}
+          render={({ field }) => (
+            <Select
+              {...field}
+              aria-label="标准原因"
+              loading={loading}
+              disabled={loading || unavailable || reasons.length === 0}
+              virtual={false}
+              options={reasons.map((reason) => ({ value: reason.code, label: reason.label }))}
+            />
+          )}
         />
       </Form.Item>
       <Form.Item label="工单编号" validateStatus={ticketError ? 'error' : undefined} help={ticketError}>
@@ -150,6 +168,21 @@ export function AdministratorsPage() {
   const canManage = role ? hasPermission(role, 'administrator.manage') : false;
   const currentAdminID = auth.session?.administrator.admin_id;
 
+  const administratorReasons = useReasonCodes(
+    'administrator',
+    canManage && (inviteOpen || Boolean(selectedAction && selectedAction.kind !== 'sessions')),
+  );
+  const sessionReasons = useReasonCodes(
+    'session',
+    canManage && selectedAction?.kind === 'sessions',
+  );
+  const activeAdministratorReasons = (administratorReasons.data?.items ?? []).filter((reason) => reason.active);
+  const activeSessionReasons = (sessionReasons.data?.items ?? []).filter((reason) => reason.active);
+  const selectedReasonCatalog = selectedAction?.kind === 'sessions' ? sessionReasons : administratorReasons;
+  const selectedReasons = selectedAction?.kind === 'sessions' ? activeSessionReasons : activeAdministratorReasons;
+  const inviteReasonsReady = administratorReasons.isSuccess && activeAdministratorReasons.length > 0;
+  const actionReasonsReady = selectedReasonCatalog.isSuccess && selectedReasons.length > 0;
+
   const administrators = useQuery({
     queryKey: ['administrators'],
     queryFn: () => request<AdministratorList>('/admin-users'),
@@ -160,12 +193,12 @@ export function AdministratorsPage() {
   const inviteForm = useForm<InviteFields>({
     resolver: zodResolver(inviteSchema),
     defaultValues: {
-      email: '', displayName: '', role: 'support', reasonCode: 'staff_change', ticketReference: '', note: '',
+      email: '', displayName: '', role: 'support', reasonCode: '', ticketReference: '', note: '',
     },
   });
   const actionForm = useForm<ActionFields>({
     resolver: zodResolver(actionSchema),
-    defaultValues: { role: 'support', reasonCode: 'access_review', ticketReference: '', note: '' },
+    defaultValues: { role: 'support', reasonCode: '', ticketReference: '', note: '' },
   });
 
   const refresh = async () => {
@@ -262,13 +295,7 @@ export function AdministratorsPage() {
     setPageError(null);
     actionForm.reset({
       role: administrator.role,
-      reasonCode: kind === 'totp'
-        ? 'mfa_reset'
-        : kind === 'suspend'
-          ? 'account_suspension'
-          : kind === 'sessions'
-            ? 'suspected_compromise'
-            : 'access_review',
+      reasonCode: '',
       ticketReference: '',
       note: '',
     });
@@ -374,7 +401,7 @@ export function AdministratorsPage() {
         cancelText="取消"
         width={620}
         confirmLoading={submitting}
-        okButtonProps={{ disabled: submitting }}
+        okButtonProps={{ disabled: submitting || !inviteReasonsReady }}
         maskClosable={false}
         closable={!submitting}
         cancelButtonProps={{ disabled: submitting }}
@@ -400,7 +427,13 @@ export function AdministratorsPage() {
               render={({ field }) => <Select {...field} aria-label="固定角色" options={roles.map((value) => ({ value, label: roleLabels[value] }))} />}
             />
           </Form.Item>
-          <ReasonControls control={inviteForm.control} errors={inviteForm.formState.errors} />
+          <ReasonControls
+            control={inviteForm.control}
+            errors={inviteForm.formState.errors}
+            reasons={activeAdministratorReasons}
+            loading={administratorReasons.isPending}
+            unavailable={administratorReasons.isError}
+          />
         </Form>
       </Modal>
 
@@ -410,7 +443,7 @@ export function AdministratorsPage() {
         okText="确认执行"
         cancelText="取消"
         confirmLoading={submitting}
-        okButtonProps={{ disabled: submitting }}
+        okButtonProps={{ disabled: submitting || !actionReasonsReady }}
         maskClosable={false}
         closable={!submitting}
         cancelButtonProps={{ disabled: submitting }}
@@ -442,7 +475,13 @@ export function AdministratorsPage() {
               />
             </Form.Item>
           )}
-          <ReasonControls control={actionForm.control} errors={actionForm.formState.errors} />
+          <ReasonControls
+            control={actionForm.control}
+            errors={actionForm.formState.errors}
+            reasons={selectedReasons}
+            loading={selectedReasonCatalog.isPending}
+            unavailable={selectedReasonCatalog.isError}
+          />
         </Form>
       </Modal>
 

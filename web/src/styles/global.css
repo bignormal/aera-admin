@@ -504,6 +504,22 @@ input {
   min-height: 46px;
 }
 
+.settings-policy-card {
+  margin-bottom: 14px;
+}
+
+.settings-policy-card > .ant-card-body {
+  padding: 18px;
+}
+
+.settings-policy-card .ant-input-number {
+  width: 100%;
+}
+
+.settings-updated-at {
+  margin: 16px 0 0 !important;
+}
+
 .detail-drawer-grid {
   display: grid;
   grid-template-columns: minmax(120px, 0.4fr) minmax(220px, 1fr);
