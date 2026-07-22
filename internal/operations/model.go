@@ -3,6 +3,8 @@ package operations
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
@@ -38,6 +40,18 @@ const (
 	RevokeSession Action = "revoke_session"
 	DisableUser   Action = "disable_user"
 	EnableUser    Action = "enable_user"
+
+	OfficialDefinitionReserve  Action = "official_definition_reserve"
+	OfficialDraftCreate        Action = "official_draft_create"
+	OfficialDraftUpdate        Action = "official_draft_update"
+	OfficialDraftSubmit        Action = "official_draft_submit"
+	OfficialSubmissionWithdraw Action = "official_submission_withdraw"
+	OfficialSubmissionReview   Action = "official_submission_review"
+	OfficialReleaseActivate    Action = "official_release_activate"
+	OfficialReleaseRollout     Action = "official_release_rollout"
+	OfficialReleasePause       Action = "official_release_pause"
+	OfficialReleaseResume      Action = "official_release_resume"
+	OfficialReleaseRollback    Action = "official_release_rollback"
 )
 
 type State string
@@ -56,6 +70,7 @@ type EnqueueRequest struct {
 	Action                Action
 	TargetID              uuid.UUID
 	ExpectedRevision      int64
+	Payload               json.RawMessage
 	Reason                admin.ActionReason
 	BrowserIdempotencyKey string
 	ApprovalID            *uuid.UUID
@@ -76,6 +91,8 @@ type Job struct {
 	ActorAdminID     uuid.UUID
 	ActorRole        rbac.Role
 	ExpectedRevision int64
+	Payload          json.RawMessage
+	PayloadDigest    [sha256.Size]byte
 	ReasonCode       string
 	TicketReference  string
 	Note             string
@@ -104,7 +121,16 @@ func (request EnqueueRequest) validate() error {
 }
 
 func (action Action) Valid() bool {
-	return action == RevokeDevice || action == RevokeSession || action == DisableUser || action == EnableUser
+	switch action {
+	case RevokeDevice, RevokeSession, DisableUser, EnableUser,
+		OfficialDefinitionReserve, OfficialDraftCreate, OfficialDraftUpdate,
+		OfficialDraftSubmit, OfficialSubmissionWithdraw, OfficialSubmissionReview,
+		OfficialReleaseActivate, OfficialReleaseRollout, OfficialReleasePause,
+		OfficialReleaseResume, OfficialReleaseRollback:
+		return true
+	default:
+		return false
+	}
 }
 
 func permissionFor(action Action) rbac.Permission {
@@ -115,12 +141,21 @@ func permissionFor(action Action) rbac.Permission {
 		return rbac.RevokeCloudSession
 	case DisableUser, EnableUser:
 		return rbac.ApproveAccountLifecycle
+	case OfficialDefinitionReserve, OfficialDraftCreate, OfficialDraftUpdate,
+		OfficialDraftSubmit, OfficialSubmissionWithdraw:
+		return rbac.ManageOfficialDrafts
+	case OfficialSubmissionReview:
+		return rbac.ReviewOfficialAgents
+	case OfficialReleaseActivate, OfficialReleaseRollout, OfficialReleasePause, OfficialReleaseResume:
+		return rbac.ManageOfficialReleases
+	case OfficialReleaseRollback:
+		return rbac.ApproveOfficialRollback
 	default:
 		return rbac.Permission("")
 	}
 }
 
-func requestDigest(request EnqueueRequest) [sha256.Size]byte {
+func requestDigest(request EnqueueRequest, payloadDigest [sha256.Size]byte) [sha256.Size]byte {
 	approvalID := ""
 	if request.ApprovalID != nil {
 		approvalID = request.ApprovalID.String()
@@ -128,6 +163,7 @@ func requestDigest(request EnqueueRequest) [sha256.Size]byte {
 	canonical := strings.Join([]string{
 		string(request.Action), request.TargetID.String(), strconv.FormatInt(request.ExpectedRevision, 10),
 		request.Reason.Code, request.Reason.TicketReference, request.Reason.Note, approvalID,
+		hex.EncodeToString(payloadDigest[:]),
 	}, "\x00")
 	return sha256.Sum256([]byte(canonical))
 }

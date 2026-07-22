@@ -73,3 +73,42 @@ func TestPermissionsAreDefensiveAndUnknownValuesDeny(t *testing.T) {
 		t.Fatal("unknown permission was allowed")
 	}
 }
+
+func TestOfficialAgentPermissionMatrix(t *testing.T) {
+	officialPermissions := []Permission{
+		ReadOfficialAgents,
+		ManageOfficialDrafts,
+		ReviewOfficialAgents,
+		ManageOfficialReleases,
+		RequestOfficialRollback,
+		ApproveOfficialRollback,
+		ReadOfficialAgentAudit,
+	}
+	want := map[Role]map[Permission]bool{
+		Developer: {
+			ReadOfficialAgents: true, ManageOfficialDrafts: true,
+		},
+		SuperAdmin: {
+			ReadOfficialAgents: true, ReviewOfficialAgents: true,
+			ApproveOfficialRollback: true, ReadOfficialAgentAudit: true,
+		},
+		Operator: {
+			ReadOfficialAgents: true, ManageOfficialReleases: true, RequestOfficialRollback: true,
+		},
+		Auditor: {
+			ReadOfficialAgents: true, ReadOfficialAgentAudit: true,
+		},
+		Support: {},
+		Finance: {},
+	}
+	for role, permissions := range want {
+		for _, permission := range officialPermissions {
+			if got := Allowed(role, permission); got != permissions[permission] {
+				t.Errorf("Allowed(%s, %s) = %v, want %v", role, permission, got, permissions[permission])
+			}
+			if !permission.Valid() {
+				t.Errorf("official permission %q is not registered", permission)
+			}
+		}
+	}
+}

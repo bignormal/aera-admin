@@ -29,6 +29,13 @@ const (
 	ReadServiceHealth        Permission = "service_health.read"
 	ReadSystemSettings       Permission = "system_settings.read"
 	ManageSystemSettings     Permission = "system_settings.manage"
+	ReadOfficialAgents       Permission = "official_agent.read"
+	ManageOfficialDrafts     Permission = "official_agent.draft.manage"
+	ReviewOfficialAgents     Permission = "official_agent.review"
+	ManageOfficialReleases   Permission = "official_agent.release.manage"
+	RequestOfficialRollback  Permission = "official_agent.rollback.request"
+	ApproveOfficialRollback  Permission = "official_agent.rollback.approve"
+	ReadOfficialAgentAudit   Permission = "official_agent.audit.read"
 )
 
 var fixedRoles = []Role{
@@ -55,11 +62,17 @@ var fixedPermissions = map[Role][]Permission{
 		ReadServiceHealth,
 		ReadSystemSettings,
 		ManageSystemSettings,
+		ReadOfficialAgents,
+		ReviewOfficialAgents,
+		ApproveOfficialRollback,
+		ReadOfficialAgentAudit,
 	},
 	Developer: {
 		ReadTechnicalUserFields,
 		ReadCloudDevices,
 		ReadServiceHealth,
+		ReadOfficialAgents,
+		ManageOfficialDrafts,
 	},
 	Operator: {
 		ReadCloudUsers,
@@ -70,6 +83,9 @@ var fixedPermissions = map[Role][]Permission{
 		InitiateAccountLifecycle,
 		ReadOwnAudit,
 		ReadServiceHealth,
+		ReadOfficialAgents,
+		ManageOfficialReleases,
+		RequestOfficialRollback,
 	},
 	Support: {
 		ReadCloudUsers,
@@ -85,6 +101,8 @@ var fixedPermissions = map[Role][]Permission{
 		ReadFullAudit,
 		ReadServiceHealth,
 		ReadSystemSettings,
+		ReadOfficialAgents,
+		ReadOfficialAgentAudit,
 	},
 }
 

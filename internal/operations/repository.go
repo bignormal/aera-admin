@@ -1,6 +1,7 @@
 package operations
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -66,11 +67,15 @@ func (repository *repository) EnqueueTx(ctx context.Context, tx pgx.Tx, request 
 	if !rbac.Allowed(request.Actor.Role, permissionFor(request.Action)) {
 		return Result{}, ErrPermissionDenied
 	}
+	canonicalPayload, payloadDigest, err := canonicalCommandPayload(request.Action, request.Payload)
+	if err != nil {
+		return Result{}, err
+	}
 
 	keyMAC := hmac.New(sha256.New, repository.hmacKey)
 	_, _ = keyMAC.Write([]byte("aera-admin.operation-idempotency.v1\x00" + request.BrowserIdempotencyKey))
 	keyDigest := keyMAC.Sum(nil)
-	semanticDigest := requestDigest(request)
+	semanticDigest := requestDigest(request, payloadDigest)
 	now := repository.clock().UTC()
 	operationID, err := uuid.NewRandom()
 	if err != nil {
@@ -79,28 +84,34 @@ func (repository *repository) EnqueueTx(ctx context.Context, tx pgx.Tx, request 
 	command, err := tx.Exec(ctx, `
 		INSERT INTO admin_idempotency_records (
 			operation_id, actor_admin_id, action, idempotency_key_hmac, request_hash,
-			state, created_at, updated_at, expires_at
-		) VALUES ($1, $2, $3, $4, $5, 'queued', $6, $6, $7)
+			command_payload, command_payload_digest, state, created_at, updated_at, expires_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $8, $9)
 		ON CONFLICT (actor_admin_id, action, idempotency_key_hmac) DO NOTHING
-	`, operationID, request.Actor.AdminID, request.Action, keyDigest, semanticDigest[:], now, now.Add(30*24*time.Hour))
+	`, operationID, request.Actor.AdminID, request.Action, keyDigest, semanticDigest[:],
+		canonicalPayload, payloadDigest[:], now, now.Add(30*24*time.Hour))
 	if err != nil {
 		return Result{}, errors.New("idempotency record could not be stored")
 	}
 	if command.RowsAffected() == 0 {
 		var existing Result
-		var existingHash []byte
+		var existingHash, existingPayload, existingPayloadDigest []byte
 		err := tx.QueryRow(ctx, `
-			SELECT operation_id, state, COALESCE(error_code, ''), updated_at, request_hash
+			SELECT operation_id, state, COALESCE(error_code, ''), updated_at, request_hash,
+			       command_payload, command_payload_digest
 			FROM admin_idempotency_records
 			WHERE actor_admin_id = $1 AND action = $2 AND idempotency_key_hmac = $3
 			FOR UPDATE
 		`, request.Actor.AdminID, request.Action, keyDigest).Scan(
 			&existing.OperationID, &existing.State, &existing.ErrorCode, &existing.UpdatedAt, &existingHash,
+			&existingPayload, &existingPayloadDigest,
 		)
 		if err != nil {
 			return Result{}, errors.New("idempotency record could not be read")
 		}
-		if len(existingHash) != sha256.Size || subtle.ConstantTimeCompare(existingHash, semanticDigest[:]) != 1 {
+		if len(existingHash) != sha256.Size || len(existingPayloadDigest) != sha256.Size ||
+			subtle.ConstantTimeCompare(existingHash, semanticDigest[:]) != 1 ||
+			subtle.ConstantTimeCompare(existingPayloadDigest, payloadDigest[:]) != 1 ||
+			!bytes.Equal(existingPayload, canonicalPayload) {
 			return Result{}, ErrIdempotencyKeyReused
 		}
 		if !existing.State.valid() || (existing.ErrorCode != "" && !operationErrorCodePattern.MatchString(existing.ErrorCode)) {
@@ -112,15 +123,17 @@ func (repository *repository) EnqueueTx(ctx context.Context, tx pgx.Tx, request 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO admin_outbox (
 			operation_id, action, target_id, approval_id, actor_admin_id, actor_role,
-			idempotency_key_hmac, expected_revision, reason_code, ticket_reference,
-			note, request_id, status, attempts, available_at, created_at, updated_at
+			idempotency_key_hmac, expected_revision, command_payload, command_payload_digest,
+			reason_code, ticket_reference, note, request_id, status, attempts,
+			available_at, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''),
-			NULLIF($11, ''), $12, 'queued', 0, $13, $13, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''),
+			NULLIF($13, ''), $14, 'queued', 0, $15, $15, $15
 		)
 	`, operationID, request.Action, request.TargetID, request.ApprovalID, request.Actor.AdminID,
-		request.Actor.Role, keyDigest, request.ExpectedRevision, request.Reason.Code,
-		request.Reason.TicketReference, request.Reason.Note, request.Reason.Meta.RequestID, now)
+		request.Actor.Role, keyDigest, request.ExpectedRevision, canonicalPayload, payloadDigest[:],
+		request.Reason.Code, request.Reason.TicketReference, request.Reason.Note,
+		request.Reason.Meta.RequestID, now)
 	if err != nil {
 		return Result{}, errors.New("operation Outbox record could not be stored")
 	}
@@ -200,7 +213,8 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 		FROM candidates
 		WHERE outbox.operation_id = candidates.operation_id
 		RETURNING outbox.operation_id, outbox.action, outbox.target_id, outbox.approval_id,
-			outbox.actor_admin_id, outbox.actor_role, outbox.expected_revision, outbox.reason_code,
+			outbox.actor_admin_id, outbox.actor_role, outbox.expected_revision,
+			outbox.command_payload, outbox.command_payload_digest, outbox.reason_code,
 			COALESCE(outbox.ticket_reference, ''), COALESCE(outbox.note, ''),
 			outbox.request_id, outbox.attempts,
 			CASE WHEN candidates.previous_status = 'executing' THEN 'reconciling' ELSE candidates.previous_status END
@@ -211,17 +225,26 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 	jobs := make([]Job, 0, limit)
 	for rows.Next() {
 		var job Job
+		var payloadDigestBytes []byte
 		if err := rows.Scan(
 			&job.OperationID, &job.Action, &job.TargetID, &job.ApprovalID,
-			&job.ActorAdminID, &job.ActorRole, &job.ExpectedRevision, &job.ReasonCode,
+			&job.ActorAdminID, &job.ActorRole, &job.ExpectedRevision,
+			&job.Payload, &payloadDigestBytes, &job.ReasonCode,
 			&job.TicketReference, &job.Note, &job.RequestID, &job.Attempts, &job.State,
 		); err != nil {
 			rows.Close()
 			return nil, errors.New("Outbox job could not be decoded")
 		}
+		if len(payloadDigestBytes) == sha256.Size {
+			copy(job.PayloadDigest[:], payloadDigestBytes)
+		}
+		job.Payload = append(json.RawMessage(nil), job.Payload...)
+		canonicalPayload, payloadDigest, payloadErr := canonicalCommandPayload(job.Action, job.Payload)
 		if job.OperationID == uuid.Nil || !job.Action.Valid() || job.TargetID == uuid.Nil ||
 			job.ActorAdminID == uuid.Nil || !job.ActorRole.Valid() || job.ExpectedRevision <= 0 ||
-			job.Attempts < 1 || (job.State != StateQueued && job.State != StateReconciling) {
+			job.Attempts < 1 || (job.State != StateQueued && job.State != StateReconciling) ||
+			len(payloadDigestBytes) != sha256.Size || payloadErr != nil ||
+			!bytes.Equal(canonicalPayload, job.Payload) || payloadDigest != job.PayloadDigest {
 			rows.Close()
 			return nil, errors.New("Outbox job contains invalid state")
 		}

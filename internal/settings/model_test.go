@@ -73,6 +73,11 @@ func TestReasonCodeValidationCompatibilityAndProtection(t *testing.T) {
 	if CompatibleReason(UsageSettings, CategoryAccount) || CompatibleReason(UsageAccount, CategoryDevice) {
 		t.Fatal("incompatible reason category was accepted")
 	}
+	if !CompatibleReason(UsageOfficialAgent, CategoryOfficialAgent) ||
+		!CompatibleReason(UsageOfficialAgent, CategorySecurity) ||
+		CompatibleReason(UsageOfficialAgent, CategoryAccount) {
+		t.Fatal("official Agent reason compatibility is incorrect")
+	}
 	if !ProtectedReasonCode("security_policy_change") || !ProtectedReasonCode("reason_catalog_change") || ProtectedReasonCode("security_review") {
 		t.Fatal("protected reason-code set is incorrect")
 	}

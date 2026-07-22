@@ -3,6 +3,8 @@ package operations
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -79,6 +81,57 @@ func TestEnqueueTxRejectsIdempotencyKeyReuseForDifferentRequest(t *testing.T) {
 	request.TargetID = uuid.New()
 	if _, err := repository.Enqueue(context.Background(), request); !errors.Is(err, ErrIdempotencyKeyReused) {
 		t.Fatalf("Enqueue() error = %v", err)
+	}
+}
+
+func TestOfficialOutboxPersistsCanonicalPayloadAndRejectsSemanticReplay(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	auditService, err := audit.NewService(postgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := seedActor(t, postgres, rbac.Developer)
+	repository, err := newRepository(postgres, bytes.Repeat([]byte{9}, 32), auditService, fixedClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := EnqueueRequest{
+		Actor: actor, Action: OfficialDefinitionReserve, TargetID: uuid.New(), ExpectedRevision: 1,
+		Payload:               json.RawMessage(`{ "display_name" : "Official Research" }`),
+		BrowserIdempotencyKey: uuid.NewString(),
+		Reason:                admin.ActionReason{Code: "official_content_review", Meta: actor.Meta},
+	}
+	first, err := repository.Enqueue(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Payload = json.RawMessage(`{"display_name":"Official Research"}`)
+	second, err := repository.Enqueue(context.Background(), request)
+	if err != nil || second.OperationID != first.OperationID {
+		t.Fatalf("semantic replay = %+v, %v", second, err)
+	}
+	canonical, digest, err := canonicalCommandPayload(request.Action, request.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idempotencyPayload, idempotencyDigest, outboxPayload, outboxDigest []byte
+	if err := postgres.QueryRow(context.Background(), `
+		SELECT identity.command_payload, identity.command_payload_digest,
+		       outbox.command_payload, outbox.command_payload_digest
+		FROM admin_idempotency_records identity
+		JOIN admin_outbox outbox USING (operation_id)
+		WHERE identity.operation_id = $1
+	`, first.OperationID).Scan(&idempotencyPayload, &idempotencyDigest, &outboxPayload, &outboxDigest); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(idempotencyPayload, canonical) || !bytes.Equal(outboxPayload, canonical) ||
+		!bytes.Equal(idempotencyDigest, digest[:]) || !bytes.Equal(outboxDigest, digest[:]) ||
+		sha256.Sum256(canonical) != digest {
+		t.Fatalf("stored canonical payload/digest mismatch")
+	}
+	request.Payload = json.RawMessage(`{"display_name":"Other Official"}`)
+	if _, err := repository.Enqueue(context.Background(), request); !errors.Is(err, ErrIdempotencyKeyReused) {
+		t.Fatalf("different official payload replay error = %v", err)
 	}
 }
 

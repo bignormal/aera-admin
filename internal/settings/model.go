@@ -43,11 +43,12 @@ const (
 	CategoryDevice        ReasonCategory = "device"
 	CategoryAccount       ReasonCategory = "account"
 	CategorySecurity      ReasonCategory = "security"
+	CategoryOfficialAgent ReasonCategory = "official_agent"
 )
 
 func (category ReasonCategory) Valid() bool {
 	return category == CategoryAdministrator || category == CategorySession || category == CategoryDevice ||
-		category == CategoryAccount || category == CategorySecurity
+		category == CategoryAccount || category == CategorySecurity || category == CategoryOfficialAgent
 }
 
 type ReasonUsage string
@@ -58,11 +59,12 @@ const (
 	UsageDevice        ReasonUsage = "device"
 	UsageSession       ReasonUsage = "session"
 	UsageSettings      ReasonUsage = "settings"
+	UsageOfficialAgent ReasonUsage = "official_agent"
 )
 
 func (usage ReasonUsage) Valid() bool {
 	return usage == UsageAdministrator || usage == UsageAccount || usage == UsageDevice ||
-		usage == UsageSession || usage == UsageSettings
+		usage == UsageSession || usage == UsageSettings || usage == UsageOfficialAgent
 }
 
 func CompatibleReason(usage ReasonUsage, category ReasonCategory) bool {
@@ -83,6 +85,8 @@ func CompatibleReason(usage ReasonUsage, category ReasonCategory) bool {
 		return category == CategorySession
 	case UsageSettings:
 		return false
+	case UsageOfficialAgent:
+		return category == CategoryOfficialAgent
 	default:
 		return false
 	}

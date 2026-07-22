@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"reflect"
@@ -61,8 +62,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 6 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 6/32", migrationCount, checksumLength)
+	if migrationCount != 7 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 7/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int
@@ -192,6 +193,115 @@ func TestMigrateCreatesConstrainedCloudControlSchema(t *testing.T) {
 	if _, err := postgres.Exec(ctx, `DELETE FROM approval_events WHERE id = $1`, eventID); err == nil {
 		t.Fatal("approval event delete unexpectedly succeeded")
 	}
+}
+
+func TestOfficialManagedAgentMigrationCreatesTypedOutboxAndAppendOnlyRollback(t *testing.T) {
+	postgres := testPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := Migrate(ctx, postgres); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	for _, table := range []string{"official_agent_rollback_requests", "official_agent_rollback_events"} {
+		assertTableExists(t, ctx, postgres, table)
+	}
+	for _, table := range []string{"admin_idempotency_records", "admin_outbox"} {
+		assertColumnType(t, ctx, postgres, table, "command_payload", "bytea")
+		assertColumnType(t, ctx, postgres, table, "command_payload_digest", "bytea")
+		for _, action := range []string{
+			"official_definition_reserve", "official_draft_create", "official_draft_update",
+			"official_draft_submit", "official_submission_withdraw", "official_submission_review",
+			"official_release_activate", "official_release_rollout", "official_release_pause",
+			"official_release_resume", "official_release_rollback",
+		} {
+			assertCheckConstraintContains(t, ctx, postgres, table, table+"_action_check", action)
+		}
+		assertCheckConstraintContains(t, ctx, postgres, table, table+"_payload_length_check", "131072")
+		assertCheckConstraint(t, ctx, postgres, table, table+"_payload_digest_length_check")
+	}
+	assertCheckConstraintContains(t, ctx, postgres, "reason_codes", "reason_codes_category_check", "official_agent")
+	var officialReasonCount int
+	if err := postgres.QueryRow(ctx, `
+		SELECT count(*) FROM reason_codes
+		WHERE category = 'official_agent' AND active AND code IN (
+			'official_content_review', 'official_rollout_change',
+			'official_release_pause', 'official_release_rollback'
+		)
+	`).Scan(&officialReasonCount); err != nil || officialReasonCount != 4 {
+		t.Fatalf("official reason count/error = %d/%v, want 4", officialReasonCount, err)
+	}
+
+	operatorID, superAdminID := uuid.New(), uuid.New()
+	seedActiveAdministrator(t, ctx, postgres, operatorID, rbac.Operator)
+	seedActiveAdministrator(t, ctx, postgres, superAdminID, rbac.SuperAdmin)
+	legacyOperationID := uuid.New()
+	_, err := postgres.Exec(ctx, `
+		INSERT INTO admin_idempotency_records (
+			operation_id, actor_admin_id, action, idempotency_key_hmac, request_hash,
+			state, created_at, updated_at, expires_at
+		) VALUES ($1, $2, 'revoke_device', $3, $4, 'queued', now(), now(), now() + interval '1 hour')
+	`, legacyOperationID, operatorID, bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32))
+	if err != nil {
+		t.Fatalf("insert legacy idempotency row: %v", err)
+	}
+	_, err = postgres.Exec(ctx, `
+		INSERT INTO admin_outbox (
+			operation_id, action, target_id, actor_admin_id, actor_role,
+			idempotency_key_hmac, expected_revision, reason_code, request_id,
+			status, attempts, available_at, created_at, updated_at
+		) VALUES ($1, 'revoke_device', $2, $3, 'operator', $4, 1, 'lost_device',
+			'req-legacy-payload', 'queued', 0, now(), now(), now())
+	`, legacyOperationID, uuid.New(), operatorID, bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatalf("insert legacy outbox row: %v", err)
+	}
+	var identityPayload, identityDigest, outboxPayload, outboxDigest []byte
+	if err := postgres.QueryRow(ctx, `
+		SELECT identity.command_payload, identity.command_payload_digest,
+		       outbox.command_payload, outbox.command_payload_digest
+		FROM admin_idempotency_records identity
+		JOIN admin_outbox outbox USING (operation_id)
+		WHERE identity.operation_id = $1
+	`, legacyOperationID).Scan(&identityPayload, &identityDigest, &outboxPayload, &outboxDigest); err != nil {
+		t.Fatalf("read legacy payload defaults: %v", err)
+	}
+	emptyDigest := sha256.Sum256([]byte(`{}`))
+	if string(identityPayload) != `{}` || string(outboxPayload) != `{}` ||
+		!bytes.Equal(identityDigest, emptyDigest[:]) || !bytes.Equal(outboxDigest, emptyDigest[:]) {
+		t.Fatalf("legacy payload defaults = %q/%x %q/%x", identityPayload, identityDigest, outboxPayload, outboxDigest)
+	}
+	requestID, eventID := uuid.New(), uuid.New()
+	_, err = postgres.Exec(ctx, `
+		INSERT INTO official_agent_rollback_requests (
+			id, release_id, target_version_id, target_release_revision_id,
+			expected_head_revision, target_digest, requested_by_admin_id,
+			reason_code, approval_status, execution_status, expires_at,
+			created_at, updated_at, version
+		) VALUES ($1, $2, $3, $4, 2, $5, $6, 'official_release_rollback',
+			'pending_review', 'not_started', now() + interval '1 hour', now(), now(), 1)
+	`, requestID, uuid.New(), uuid.New(), uuid.New(), bytes.Repeat([]byte{8}, 32), operatorID)
+	if err != nil {
+		t.Fatalf("insert rollback request: %v", err)
+	}
+	_, err = postgres.Exec(ctx, `
+		INSERT INTO official_agent_rollback_events (
+			id, rollback_request_id, event_type, actor_admin_id, actor_role,
+			approval_status, execution_status, created_at
+		) VALUES ($1, $2, 'requested', $3, 'operator', 'pending_review', 'not_started', now())
+	`, eventID, requestID, operatorID)
+	if err != nil {
+		t.Fatalf("insert rollback event: %v", err)
+	}
+	if _, err := postgres.Exec(ctx, `UPDATE official_agent_rollback_events SET event_type = 'cancelled' WHERE id = $1`, eventID); err == nil {
+		t.Fatal("rollback event update unexpectedly succeeded")
+	}
+	if _, err := postgres.Exec(ctx, `DELETE FROM official_agent_rollback_events WHERE id = $1`, eventID); err == nil {
+		t.Fatal("rollback event delete unexpectedly succeeded")
+	}
+	if _, err := postgres.Exec(ctx, `UPDATE official_agent_rollback_requests SET reviewed_by_admin_id = $2 WHERE id = $1`, requestID, operatorID); err == nil {
+		t.Fatal("rollback request accepted requester as reviewer")
+	}
+	_ = superAdminID
 }
 
 func TestAdminAuditEventsAreAppendOnly(t *testing.T) {
