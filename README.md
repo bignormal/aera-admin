@@ -2,7 +2,7 @@
 
 Aera Admin 是 Aera 公司内部控制台，只允许获批的开发、运营、客服、财务和审计人员访问。它不向普通用户或 Workspace Owner 开放，也不复用普通 Aera 用户凭证。
 
-当前仓库已完成独立管理员认证安全底座，以及 Admin 侧 Cloud 用户、设备、会话、双人审批、幂等和 Outbox 工作流。Cloud 管理未配置或不可达时严格失败关闭，页面不会生成演示指标或显示虚假成功。
+当前仓库已完成 Aera Admin 一期功能：独立管理员认证安全底座、固定 RBAC、不可变审计查询、管理员会话与审计保留策略、动态标准原因目录，以及 Admin 侧 Cloud 用户、设备、会话、双人审批、幂等和 Outbox 工作流。Cloud 管理或标准原因目录不可达时严格失败关闭，页面不会回退到模拟数据、浏览器硬编码原因或虚假成功。
 
 真实 `aera-cloud` 已实现独立的 Internal Admin API 监听、mTLS 与短期 Ed25519 服务令牌双重鉴权。当前跨仓库 E2E 会启动真实 Cloud、真实 Admin 和各自隔离的 PostgreSQL/Redis，验证精确身份查询的脱敏结果、Session 撤销、双人审批后的账号禁用、Outbox 重试、Cloud 最终状态与两侧审计；这仍是本地验收结果，不代表已经部署或发布。
 
@@ -63,11 +63,21 @@ make build
 
 每人访问各自的 `/activate#token=...` 链接，创建独立密码、绑定 TOTP 并保存八个一次性恢复码。两人完成激活前，管理员变更保持关闭。
 
+## 一期权限与安全策略
+
+审计记录通过 `/audit` 查询，服务端按固定角色强制数据范围：超级管理员和审计员可查看全部记录，运营与客服只能查看本人记录，开发与财务无权访问。接口支持稳定游标分页，以及操作人、事件、对象、结果、标准原因和时间范围的精确筛选；响应不包含完整身份、来源 IP 摘要、User-Agent 或审计哈希链字段。每次成功查询本身也会写入审计，但只记录筛选类别，不记录筛选值。
+
+`/system/settings` 由超级管理员管理，审计员只读。所有设置写入都要求最近一次 TOTP Step-up、同源 Origin、CSRF、`Idempotency-Key`、预期修订号和有效的安全类标准原因。修改会话空闲时长或绝对有效期会撤销所有管理员会话（包括修改者），页面收到成功结果后清理内存会话并返回登录页；仅修改审计保留期限不会撤销会话。
+
+`audit_retention_days` 是部署与合规操作必须满足的最低保留策略。Admin 运行时不会删除或归档审计记录，页面也不提供删除入口；物理生命周期处理需要另行授权的维护流程，不属于一期运行时能力。
+
+标准原因由服务端版本化目录统一提供。管理员、账号、设备、会话和设置表单按操作用途获取允许的有效原因；目录不可用或没有匹配原因时提交按钮保持关闭。原因码和分类创建后不可修改，记录不会删除，受保护的安全原因及每个分类最后一个有效原因不能停用。
+
 ## 验收门禁
 
 ```bash
 make verify  # 格式、vet、Go/竞态/集成、前端、OpenAPI、E2E 类型与 release 构建
-AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-admin-api make e2e
+AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud make e2e
 make image   # aera-admin:security-foundation
 ```
 

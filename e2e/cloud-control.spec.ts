@@ -1,12 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 import {
   apiRequest,
   appendSensitiveCanaries,
   generateTOTP,
+  loginInBrowser,
   loginWithRecovery,
   readFixtures,
-  type AdministratorFixture,
   type SensitiveCanary,
 } from './support';
 
@@ -184,18 +184,3 @@ test('every unauthorized fixed role receives API 403 for Cloud mutations', async
   }
   appendSensitiveCanaries(canaries);
 });
-
-async function loginInBrowser(
-  page: Page,
-  fixture: AdministratorFixture,
-  recoveryIndex: number,
-): Promise<void> {
-  await page.goto('/login');
-  await page.getByLabel('内部邮箱').fill(fixture.email);
-  await page.getByLabel('密码').fill(fixture.password);
-  await page.getByRole('button', { name: /继\s*续/ }).click();
-  await page.getByRole('button', { name: '使用恢复码' }).click();
-  await page.getByLabel('恢复码').fill(fixture.recoveryCodes[recoveryIndex]);
-  await page.getByRole('button', { name: /安\s*全\s*登\s*录/ }).click();
-  await expect(page.getByRole('heading', { name: '内部运营工作台' })).toBeVisible();
-}

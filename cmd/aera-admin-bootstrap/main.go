@@ -17,6 +17,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/config"
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/secure"
+	adminsettings "github.com/bignormal/aera-admin/internal/settings"
 	"github.com/bignormal/aera-admin/internal/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -134,9 +135,13 @@ func buildBootstrapService(settings config.Config, postgres *pgxpool.Pool) (*adm
 	if err != nil {
 		return nil, err
 	}
+	settingsStore, err := adminsettings.NewStore(postgres)
+	if err != nil {
+		return nil, err
+	}
 	return admin.NewService(admin.ServiceConfig{
 		PostgreSQL: postgres, Passwords: passwords, Identities: identities,
 		TOTPSecrets: totpSecrets, TOTP: secure.DefaultTOTP(), Audit: auditService,
-		PublicURL: settings.PublicURL,
+		Reasons: settingsStore, PublicURL: settings.PublicURL,
 	})
 }

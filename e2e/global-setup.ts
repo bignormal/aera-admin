@@ -79,35 +79,40 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   );
   bootstrapActor.csrfToken = steppedUp.body.csrf_token;
 
-  const cloudReviewerEmail = 'e2e.super3.canary@example.test';
-  const cloudReviewerPassword = passwordFor('super-admin', 3);
-  const cloudReviewerInvitation = await apiRequest<{ activation_url: string }>(
-    baseURL,
-    '/admin-users/invitations',
-    {
+  const dedicatedSuperAdministrators = [
+    { displayName: 'Cloud 审批超级管理员', purpose: 'CLOUD-REVIEWER' },
+    { displayName: '安全设置超级管理员', purpose: 'SETTINGS' },
+    { displayName: '会话策略超级管理员', purpose: 'SESSION-POLICY' },
+    { displayName: '策略恢复超级管理员', purpose: 'POLICY-RESTORE' },
+  ];
+  for (const [offset, dedicated] of dedicatedSuperAdministrators.entries()) {
+    const ordinal = offset + 3;
+    const email = `e2e.super${ordinal}.canary@example.test`;
+    const password = passwordFor('super-admin', ordinal);
+    const invited = await apiRequest<{ activation_url: string }>(baseURL, '/admin-users/invitations', {
       body: {
-        display_name: 'Cloud 审批超级管理员',
-        email: cloudReviewerEmail,
+        display_name: dedicated.displayName,
+        email,
         note: '',
         reason_code: 'staff_change',
         role: 'super_admin',
-        ticket_reference: 'E2E-CLOUD-REVIEWER',
+        ticket_reference: `E2E-${dedicated.purpose}`,
       },
       cookie: bootstrapActor.cookie,
       csrfToken: bootstrapActor.csrfToken,
-    },
-  );
-  expectStatus(cloudReviewerInvitation, 201, 'invite Cloud approval super administrator');
-  roleFixtures.super_admin.push(
-    await activateInvitation(
-      baseURL,
-      cloudReviewerInvitation.body.activation_url,
-      cloudReviewerEmail,
-      cloudReviewerPassword,
-      'super_admin',
-      sensitiveCanaries,
-    ),
-  );
+    });
+    expectStatus(invited, 201, `invite ${dedicated.purpose} super administrator`);
+    roleFixtures.super_admin.push(
+      await activateInvitation(
+        baseURL,
+        invited.body.activation_url,
+        email,
+        password,
+        'super_admin',
+        sensitiveCanaries,
+      ),
+    );
+  }
 
   for (const [ordinal, role] of managedRoles.entries()) {
     const email = `e2e.${role}.canary@example.test`;

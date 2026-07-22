@@ -30,6 +30,7 @@ describe('SystemSettingsPage', () => {
     expect(await screen.findByText('只读模式')).toBeVisible();
     expect(await screen.findByLabelText('会话空闲超时（分钟）')).toHaveValue('30');
     expect(screen.getByText('设置修订号：4')).toBeVisible();
+    expect(screen.getByText('修改保留期限不会立即删除或归档现有审计记录')).toBeVisible();
     expect(screen.getByText('人员变更')).toBeVisible();
     expect(screen.getByText('已停用')).toBeVisible();
     expect(screen.queryByRole('button', { name: '保存安全策略' })).not.toBeInTheDocument();

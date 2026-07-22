@@ -1,6 +1,8 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
+import { expect, type Page } from '@playwright/test';
+
 export const roles = ['super_admin', 'developer', 'operator', 'support', 'finance', 'auditor'] as const;
 export type Role = (typeof roles)[number];
 
@@ -185,6 +187,14 @@ function assertAbsent(raw: string, values: string[], operation: string): void {
   }
 }
 
+export function assertNoSensitiveCanaries(
+  raw: string,
+  canaries: SensitiveCanary[],
+  operation: string,
+): void {
+  assertAbsent(raw, canaries.map((canary) => canary.value), operation);
+}
+
 export async function prepareActivation(
   baseURL: string,
   activationURL: string,
@@ -282,6 +292,37 @@ export async function loginWithRecovery(
     { kind: 'csrf_token', value: completed.body.csrf_token },
   );
   return { cookie, csrfToken: completed.body.csrf_token, fixture };
+}
+
+export async function loginInBrowser(
+  page: Page,
+  fixture: AdministratorFixture,
+  recoveryIndex: number,
+  canaries?: SensitiveCanary[],
+): Promise<void> {
+  await page.goto('/login');
+  await page.getByLabel('内部邮箱').fill(fixture.email);
+  await page.getByLabel('密码').fill(fixture.password);
+  await page.getByRole('button', { name: /继\s*续/ }).click();
+  await page.getByRole('button', { name: '使用恢复码' }).click();
+  const recoveryCode = fixture.recoveryCodes[recoveryIndex];
+  if (!recoveryCode) throw new Error('requested browser recovery code is unavailable');
+  await page.getByLabel('恢复码').fill(recoveryCode);
+  const completed = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/totp/verify'));
+  await page.getByRole('button', { name: /安\s*全\s*登\s*录/ }).click();
+  const response = await completed;
+  expect(response.status()).toBe(200);
+  const raw = await response.text();
+  assertAbsent(raw, [fixture.email, fixture.password, recoveryCode], 'browser recovery-code authentication');
+  const document = JSON.parse(raw) as { csrf_token?: string };
+  await expect(page.getByRole('heading', { name: '内部运营工作台' })).toBeVisible();
+  const sessionCookie = (await page.context().cookies()).find(
+    (cookie) => cookie.name === '__Host-aera_admin_session',
+  );
+  canaries?.push(
+    { kind: 'session_token', value: sessionCookie?.value ?? '' },
+    { kind: 'csrf_token', value: document.csrf_token ?? '' },
+  );
 }
 
 export function maskedEmail(email: string): string {

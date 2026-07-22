@@ -400,6 +400,13 @@ export function SystemSettingsPage() {
           title="会话与审计策略"
           extra={<Typography.Text type="secondary">设置修订号：{policyQuery.data.revision}</Typography.Text>}
         >
+          <Alert
+            className="page-alert"
+            type="info"
+            showIcon
+            message="修改保留期限不会立即删除或归档现有审计记录"
+            description="该数值是部署与合规操作必须执行的最低保留策略；管理端保持审计记录只追加且不提供删除入口。"
+          />
           {canManage && (
             <Alert
               className="page-alert"
