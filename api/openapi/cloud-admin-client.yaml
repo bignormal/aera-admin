@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
-  title: Aera Cloud Internal Admin API Consumer Contract
-  version: 0.1.0
+  title: Aera Cloud Internal Admin API
+  version: 1.0.0
   description: |
-    Aera Admin 消费的最小 Cloud 内部管理契约。身份字段必须保持脱敏；
-    该文件只描述消费边界，不在本仓库实现 Cloud 服务端。
+    Shared provider/consumer contract for the Aera Cloud Internal Admin API.
+    Exact identity lookup accepts a full email or phone only in the request body;
+    every identity field in every response remains masked.
 servers:
   - url: https://aera-cloud-admin.invalid
 security:

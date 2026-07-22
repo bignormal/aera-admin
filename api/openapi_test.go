@@ -1,12 +1,32 @@
 package api_test
 
 import (
+	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestCloudAdminContractMatchesProviderWhenConfigured(t *testing.T) {
+	cloudRepo := os.Getenv("AERA_ADMIN_TEST_CLOUD_REPO")
+	if cloudRepo == "" {
+		t.Skip("AERA_ADMIN_TEST_CLOUD_REPO is not configured")
+	}
+	consumer, err := os.ReadFile("openapi/cloud-admin-client.yaml")
+	if err != nil {
+		t.Fatalf("read Cloud Admin consumer contract: %v", err)
+	}
+	provider, err := os.ReadFile(filepath.Join(cloudRepo, "api", "openapi", "internal-admin.yaml"))
+	if err != nil {
+		t.Fatalf("read Cloud Admin provider contract: %v", err)
+	}
+	if !bytes.Equal(consumer, provider) {
+		t.Fatal("Cloud Internal Admin provider and consumer contracts differ")
+	}
+}
 
 func TestOpenAPIContract(t *testing.T) {
 	encoded, err := os.ReadFile("openapi/admin.yaml")
