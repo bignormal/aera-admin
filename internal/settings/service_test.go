@@ -217,6 +217,13 @@ func newSettingsFixture(t *testing.T, recorder audit.TransactionalRecorder) *set
 	actorID := uuid.New()
 	now := settingsClock()
 	if _, err := postgres.Exec(context.Background(), `
+		UPDATE admin_security_settings
+		SET created_at = $1, updated_at = $1
+		WHERE settings_key = 'global'
+	`, now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := postgres.Exec(context.Background(), `
 		INSERT INTO admin_users (id, display_name, role, status, security_version, created_at, updated_at)
 		VALUES ($1, 'Settings Test Admin', 'super_admin', 'active', 1, $2, $2)
 	`, actorID, now.Add(-time.Hour)); err != nil {
