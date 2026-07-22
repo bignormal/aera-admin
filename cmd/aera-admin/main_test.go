@@ -30,6 +30,18 @@ func TestNewHTTPServerUsesBoundedTimeouts(t *testing.T) {
 	}
 }
 
+func TestNewAdminRouterRegistersAuditRoute(t *testing.T) {
+	auditHandler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	})
+	router := newAdminRouter(http.NotFoundHandler(), http.NotFoundHandler(), http.NotFoundHandler(), auditHandler)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/audit-events", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("audit route response = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
 func TestBuildAdminRuntimeWiresPublicAuthProtectedRoutesAndWorker(t *testing.T) {
 	postgres := testkit.Postgres(t)
 	redisClient, _ := testkit.Redis(t)
@@ -89,12 +101,21 @@ func TestBuildAdminRuntimeWiresPublicAuthProtectedRoutesAndWorker(t *testing.T) 
 	`).Scan(&sourceHMACLength); err != nil || sourceHMACLength != 32 {
 		t.Fatalf("login failure source IP audit length/error = %d/%v", sourceHMACLength, err)
 	}
-	protectedRequest := httptest.NewRequest(http.MethodGet, "/admin-users", nil)
-	protectedRequest.RemoteAddr = "192.0.2.20:4242"
-	protectedResponse := httptest.NewRecorder()
-	runtime.API.ServeHTTP(protectedResponse, protectedRequest)
-	if protectedResponse.Code != http.StatusUnauthorized || !strings.Contains(protectedResponse.Body.String(), `"code":"AUTH_REQUIRED"`) {
-		t.Fatalf("protected route response = %d %q", protectedResponse.Code, protectedResponse.Body.String())
+	for _, path := range []string{"/admin-users", "/audit-events"} {
+		protectedRequest := httptest.NewRequest(http.MethodGet, path, nil)
+		protectedRequest.RemoteAddr = "192.0.2.20:4242"
+		protectedResponse := httptest.NewRecorder()
+		runtime.API.ServeHTTP(protectedResponse, protectedRequest)
+		if protectedResponse.Code != http.StatusUnauthorized || !strings.Contains(protectedResponse.Body.String(), `"code":"AUTH_REQUIRED"`) {
+			t.Fatalf("protected route %s response = %d %q", path, protectedResponse.Code, protectedResponse.Body.String())
+		}
+	}
+	auditRouteProbe := httptest.NewRequest(http.MethodOptions, "/audit-events", nil)
+	auditRouteProbe.RemoteAddr = "192.0.2.20:4242"
+	auditRouteResponse := httptest.NewRecorder()
+	runtime.API.ServeHTTP(auditRouteResponse, auditRouteProbe)
+	if auditRouteResponse.Code != http.StatusMethodNotAllowed || !strings.Contains(auditRouteResponse.Body.String(), `"code":"METHOD_NOT_ALLOWED"`) {
+		t.Fatalf("audit route probe response = %d %q", auditRouteResponse.Code, auditRouteResponse.Body.String())
 	}
 }
 

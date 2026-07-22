@@ -20,6 +20,7 @@ tags:
   - name: CloudDevices
   - name: Approvals
   - name: Operations
+  - name: Audit
   - name: System
 
 paths:
@@ -662,6 +663,54 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /audit-events:
+    get:
+      tags: [Audit]
+      summary: 按当前管理员的数据范围查询不可变审计记录
+      description: |
+        超级管理员和审计员可查询全部记录；运营和客服角色由服务端强制限定为本人记录。
+        响应只包含安全投影，不返回来源 IP 摘要、User-Agent 或哈希链字段。
+      operationId: listAuditEvents
+      security:
+        - adminSession: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: actor_admin_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: event_type
+          in: query
+          schema: { type: string, pattern: '^[a-z][a-z0-9_.]{0,99}$' }
+        - name: object_type
+          in: query
+          schema: { type: string, pattern: '^[a-z][a-z0-9_.]{0,99}$' }
+        - name: object_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: outcome
+          in: query
+          schema: { type: string, enum: [success, failure, denied] }
+        - name: reason_code
+          in: query
+          schema: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200': { $ref: '#/components/responses/AuditEventPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuditUnavailable' }
+
   /system/health:
     get:
       tags: [System]
@@ -1192,6 +1241,53 @@ components:
           items: { $ref: '#/components/schemas/ApprovalRequest' }
         next_cursor: { type: string, maxLength: 512 }
 
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - actor_admin_id
+        - event_type
+        - object_type
+        - object_id
+        - outcome
+        - approval_id
+        - operation_id
+        - request_id
+        - created_at
+      properties:
+        id: { type: string, format: uuid }
+        actor_admin_id: { type: [string, 'null'], format: uuid }
+        actor_role: { $ref: '#/components/schemas/AdminRole' }
+        event_type: { type: string, pattern: '^[a-z][a-z0-9_.]{0,99}$' }
+        object_type: { type: string, pattern: '^[a-z][a-z0-9_.]{0,99}$' }
+        object_id: { type: [string, 'null'], format: uuid }
+        outcome: { type: string, enum: [success, failure, denied] }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+        approval_id: { type: [string, 'null'], format: uuid }
+        operation_id: { type: [string, 'null'], format: uuid }
+        error_code: { type: string, maxLength: 100 }
+        before_state:
+          type: object
+          additionalProperties: { type: string }
+        after_state:
+          type: object
+          additionalProperties: { type: string }
+        request_id: { type: string, maxLength: 128 }
+        created_at: { type: string, format: date-time }
+
+    AuditEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+        next_cursor: { type: [string, 'null'], maxLength: 512 }
+
     SystemHealth:
       type: object
       additionalProperties: false
@@ -1293,6 +1389,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ApprovalPage' }
+    AuditEventPage:
+      description: 按权限数据范围过滤后的安全审计记录页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AuditEventPage' }
     SystemHealth:
       description: 不包含内部地址或凭据的依赖健康状态
       content:
@@ -1394,3 +1495,9 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorDocument' }
           example: { error: { code: AUTH_UNAVAILABLE, message: 认证服务暂时不可用 } }
+    AuditUnavailable:
+      description: 审计查询或查询行为审计不可用；请求失败关闭
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: AUDIT_UNAVAILABLE, message: 审计服务暂时不可用 } }

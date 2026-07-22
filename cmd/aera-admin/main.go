@@ -14,6 +14,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/admin"
 	"github.com/bignormal/aera-admin/internal/approval"
 	adminaudit "github.com/bignormal/aera-admin/internal/audit"
+	"github.com/bignormal/aera-admin/internal/audithttp"
 	adminauth "github.com/bignormal/aera-admin/internal/auth"
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
 	"github.com/bignormal/aera-admin/internal/cloudcontrol"
@@ -218,20 +219,9 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 	if err != nil {
 		return adminRuntime{}, err
 	}
-	router := http.NewServeMux()
-	for _, path := range []string{"/auth/login", "/auth/totp/verify", "/auth/step-up", "/auth/logout", "/me"} {
-		router.Handle(path, authHandler)
-	}
-	for _, path := range []string{"/auth/activation/prepare", "/auth/activate", "/admin-users", "/admin-users/"} {
-		router.Handle(path, administratorHandler)
-	}
+	auditHandler := audithttp.NewHandler(auditService)
 	cloudHandler := cloudcontrol.NewHandler(cloudService)
-	for _, path := range []string{
-		"/cloud-users", "/cloud-users/", "/cloud-devices/", "/cloud-sessions/",
-		"/approval-requests", "/approval-requests/", "/operations/", "/system/health",
-	} {
-		router.Handle(path, cloudHandler)
-	}
+	router := newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler)
 	browserSecurity, err := adminauth.NewBrowserSecurity(adminauth.BrowserSecurityConfig{
 		Service: authService, PublicURL: settings.PublicURL, SourceIPHMACKey: settings.SessionHMACKey,
 		TrustedProxyCIDRs: settings.TrustedProxyCIDRs,
@@ -240,6 +230,24 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 		return adminRuntime{}, err
 	}
 	return adminRuntime{API: browserSecurity.Wrap(router), Worker: worker}, nil
+}
+
+func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler http.Handler) *http.ServeMux {
+	router := http.NewServeMux()
+	for _, path := range []string{"/auth/login", "/auth/totp/verify", "/auth/step-up", "/auth/logout", "/me"} {
+		router.Handle(path, authHandler)
+	}
+	for _, path := range []string{"/auth/activation/prepare", "/auth/activate", "/admin-users", "/admin-users/"} {
+		router.Handle(path, administratorHandler)
+	}
+	for _, path := range []string{
+		"/cloud-users", "/cloud-users/", "/cloud-devices/", "/cloud-sessions/",
+		"/approval-requests", "/approval-requests/", "/operations/", "/system/health",
+	} {
+		router.Handle(path, cloudHandler)
+	}
+	router.Handle("/audit-events", auditHandler)
+	return router
 }
 
 func newHTTPServer(address string, handler http.Handler) *http.Server {

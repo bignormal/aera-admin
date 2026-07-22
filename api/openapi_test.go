@@ -41,8 +41,8 @@ func TestOpenAPIContract(t *testing.T) {
 		t.Fatalf("OpenAPI version = %v, want 3.1.0", document["openapi"])
 	}
 	paths := object(t, document["paths"], "paths")
-	if len(paths) != 27 {
-		t.Fatalf("OpenAPI path count = %d, want 27", len(paths))
+	if len(paths) != 28 {
+		t.Fatalf("OpenAPI path count = %d, want 28", len(paths))
 	}
 	operationIDs := make(map[string]string)
 	for path, rawPathItem := range paths {
@@ -86,6 +86,30 @@ func TestOpenAPIContract(t *testing.T) {
 	assertSessionAndCSRF(t, roleOperation, "/admin-users/{adminID}/role")
 
 	walkReferences(t, document, document, "#")
+}
+
+func TestAuditBrowserContractUsesSafeCursorProjection(t *testing.T) {
+	raw := readContract(t, "openapi/admin.yaml")
+	if !strings.Contains(raw, "operationId: listAuditEvents") {
+		t.Fatal("audit query operation is missing")
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := object(t, document["paths"], "paths")
+	operation := object(t, object(t, paths["/audit-events"], "audit path")["get"], "audit get")
+	security := operation["security"]
+	if security == nil {
+		t.Fatal("audit query does not require administrator session security")
+	}
+	schemas := object(t, object(t, document["components"], "components")["schemas"], "schemas")
+	properties := object(t, object(t, schemas["AuditEvent"], "AuditEvent")["properties"], "AuditEvent properties")
+	for _, forbidden := range []string{"source_ip_hmac", "user_agent", "previous_hash", "event_hash", "email", "phone"} {
+		if _, present := properties[forbidden]; present {
+			t.Errorf("AuditEvent exposes %s", forbidden)
+		}
+	}
 }
 
 func readContract(t *testing.T, name string) string {

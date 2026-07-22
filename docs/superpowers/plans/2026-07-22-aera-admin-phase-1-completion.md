@@ -223,8 +223,8 @@ git commit -m "feat: add scoped audit event queries"
 ### Task 3: Expose the audit API and server-enforced data range
 
 **Files:**
-- Create: `internal/audit/http.go`
-- Create: `internal/audit/http_test.go`
+- Create: `internal/audithttp/http.go`
+- Create: `internal/audithttp/http_test.go`
 - Modify: `cmd/aera-admin/main.go`
 - Modify: `cmd/aera-admin/main_test.go`
 - Modify: `api/openapi/admin.yaml`
@@ -232,7 +232,7 @@ git commit -m "feat: add scoped audit event queries"
 
 **Interfaces:**
 - Produces: `GET /api/v1/audit-events`.
-- Consumes: `auth.PrincipalFromContext`, `auth.RequestMetaFromContext`, `rbac.ReadFullAudit`, `rbac.ReadOwnAudit`, `audit.Service.List` and `audit.Service.Append`.
+- Consumes: `auth.PrincipalFromContext`, `auth.RequestMetaFromContext`, `rbac.ReadFullAudit`, `rbac.ReadOwnAudit`, `audit.Service.List` and `audit.Service.Append`. The adapter is a separate package because `auth` already imports `audit`; this preserves an acyclic dependency graph.
 
 - [ ] **Step 1: Write failing HTTP scope tests**
 
@@ -251,7 +251,7 @@ Cover full readers, own readers, all unauthorized roles, malformed cursor, inval
 
 - [ ] **Step 2: Run HTTP tests and verify RED**
 
-Run: `go test ./internal/audit -run TestHTTP -count=1`
+Run: `go test ./internal/audithttp -run TestHTTP -count=1`
 
 Expected: compilation failure because the handler is absent.
 
@@ -266,7 +266,7 @@ Document every filter, cursor, `items`, nullable `next_cursor`, safe state maps,
 - [ ] **Step 5: Wire the handler into the runtime**
 
 ```go
-auditHandler := adminaudit.NewHandler(auditService)
+auditHandler := audithttp.NewHandler(auditService)
 router.Handle("/audit-events", auditHandler)
 ```
 
@@ -277,7 +277,7 @@ The handler itself enforces the any-of audit permission because the current gene
 Run:
 
 ```bash
-go test ./internal/audit ./cmd/aera-admin ./api -count=1
+go test ./internal/audit ./internal/audithttp ./cmd/aera-admin ./api -count=1
 ```
 
 Expected: PASS.
@@ -285,7 +285,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add internal/audit cmd/aera-admin api
+git add internal/audithttp cmd/aera-admin api docs/superpowers/plans/2026-07-22-aera-admin-phase-1-completion.md
 git commit -m "feat: expose administrator audit queries"
 ```
 

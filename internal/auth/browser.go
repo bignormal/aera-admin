@@ -77,6 +77,12 @@ func RequestMetaFromContext(ctx context.Context) (RequestMeta, bool) {
 	return meta, ok
 }
 
+func WithRequestMeta(request *http.Request, meta RequestMeta) *http.Request {
+	cloned := meta
+	cloned.SourceIPHMAC = append([]byte(nil), meta.SourceIPHMAC...)
+	return request.WithContext(context.WithValue(request.Context(), requestMetaContextKey{}, cloned))
+}
+
 func (security *BrowserSecurity) withRequestMeta(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requestID := "req-" + uuid.NewString()
