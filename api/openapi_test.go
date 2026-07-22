@@ -41,8 +41,8 @@ func TestOpenAPIContract(t *testing.T) {
 		t.Fatalf("OpenAPI version = %v, want 3.1.0", document["openapi"])
 	}
 	paths := object(t, document["paths"], "paths")
-	if len(paths) != 28 {
-		t.Fatalf("OpenAPI path count = %d, want 28", len(paths))
+	if len(paths) != 32 {
+		t.Fatalf("OpenAPI path count = %d, want 32", len(paths))
 	}
 	operationIDs := make(map[string]string)
 	for path, rawPathItem := range paths {
@@ -108,6 +108,65 @@ func TestAuditBrowserContractUsesSafeCursorProjection(t *testing.T) {
 	for _, forbidden := range []string{"source_ip_hmac", "user_agent", "previous_hash", "event_hash", "email", "phone"} {
 		if _, present := properties[forbidden]; present {
 			t.Errorf("AuditEvent exposes %s", forbidden)
+		}
+	}
+}
+
+func TestSettingsBrowserContractDeclaresRBACStepUpAndStableMutations(t *testing.T) {
+	raw := readContract(t, "openapi/admin.yaml")
+	for _, operationID := range []string{
+		"getSystemSettings", "updateSystemSecurityPolicy", "listSystemReasonCodes",
+		"createSystemReasonCode", "updateSystemReasonCode",
+	} {
+		if !strings.Contains(raw, "operationId: "+operationID) {
+			t.Errorf("missing settings operation %s", operationID)
+		}
+	}
+	for _, code := range []string{
+		"SETTINGS_REVISION_CONFLICT", "SETTINGS_POLICY_INVALID", "REASON_CODE_ALREADY_EXISTS",
+		"REASON_CODE_NOT_FOUND", "REASON_CODE_INACTIVE", "REASON_CODE_CATEGORY_MISMATCH",
+		"REASON_CODE_LAST_ACTIVE", "REASON_CODE_PROTECTED", "IDEMPOTENCY_KEY_REUSED",
+	} {
+		if !strings.Contains(raw, code) {
+			t.Errorf("missing stable settings error %s", code)
+		}
+	}
+
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := object(t, document["paths"], "paths")
+	for path, method := range map[string]string{
+		"/system/settings/security-policy": "put",
+		"/system/reason-codes":             "post",
+		"/system/reason-codes/{code}":      "put",
+	} {
+		operation := object(t, object(t, paths[path], path)[method], path+" "+method)
+		assertSessionAndCSRF(t, operation, path)
+		parameters, ok := operation["parameters"].([]any)
+		if !ok || len(parameters) == 0 {
+			t.Fatalf("settings mutation %s has no Idempotency-Key parameter", path)
+		}
+	}
+	for _, path := range []string{"/system/settings", "/system/reason-codes"} {
+		operation := object(t, object(t, paths[path], path)["get"], path+" get")
+		if operation["security"] == nil {
+			t.Fatalf("settings read %s has no session security", path)
+		}
+	}
+
+	schemas := object(t, object(t, document["components"], "components")["schemas"], "schemas")
+	policyProperties := object(t, object(t, schemas["SecurityPolicy"], "SecurityPolicy")["properties"], "SecurityPolicy properties")
+	for _, field := range []string{"session_idle_minutes", "session_absolute_hours", "audit_retention_days", "revision", "updated_by_admin_id", "updated_at"} {
+		if _, ok := policyProperties[field]; !ok {
+			t.Errorf("SecurityPolicy is missing %s", field)
+		}
+	}
+	reasonProperties := object(t, object(t, schemas["ReasonCode"], "ReasonCode")["properties"], "ReasonCode properties")
+	for _, forbidden := range []string{"email", "phone", "source_ip_hmac", "user_agent"} {
+		if _, ok := reasonProperties[forbidden]; ok {
+			t.Errorf("ReasonCode exposes %s", forbidden)
 		}
 	}
 }

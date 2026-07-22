@@ -21,6 +21,7 @@ tags:
   - name: Approvals
   - name: Operations
   - name: Audit
+  - name: Settings
   - name: System
 
 paths:
@@ -711,6 +712,127 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuditUnavailable' }
 
+  /system/settings:
+    get:
+      tags: [Settings]
+      summary: 获取管理员会话策略与审计保留策略
+      description: 需要 `system_settings.read`；固定授予超级管理员和审计员。
+      operationId: getSystemSettings
+      security:
+        - adminSession: []
+      responses:
+        '200': { $ref: '#/components/responses/SecurityPolicy' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/SettingsUnavailable' }
+
+  /system/settings/security-policy:
+    put:
+      tags: [Settings]
+      summary: 更新管理员会话策略与审计保留策略
+      description: |
+        需要 `system_settings.manage`、10 分钟内由 TOTP 建立的 Step-up、同源 Origin、
+        CSRF 和 Idempotency-Key。会话时长发生变化时撤销包括调用者在内的全部管理员会话。
+      operationId: updateSystemSecurityPolicy
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSecurityPolicyRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SecurityPolicyMutation' }
+        '400': { $ref: '#/components/responses/SettingsPolicyInvalid' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/SettingsConflict' }
+        '503': { $ref: '#/components/responses/SettingsUnavailable' }
+
+  /system/reason-codes:
+    get:
+      tags: [Settings]
+      summary: 获取标准原因码目录
+      description: |
+        任意已认证管理员可按一个 `usage` 获取该操作允许使用的有效原因码。
+        只有 `system_settings.read` 可按分类或全量读取，并可包含已停用原因码。
+        `usage` 与 `category` 互斥；`usage` 不允许与 `include_inactive=true` 同时使用。
+      operationId: listSystemReasonCodes
+      security:
+        - adminSession: []
+      parameters:
+        - name: usage
+          in: query
+          schema: { $ref: '#/components/schemas/ReasonUsage' }
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/ReasonCategory' }
+        - name: include_inactive
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200': { $ref: '#/components/responses/ReasonCodePage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/SettingsUnavailable' }
+    post:
+      tags: [Settings]
+      summary: 创建标准原因码
+      description: 需要 `system_settings.manage`、10 分钟内 TOTP Step-up、同源 Origin、CSRF 和幂等键。
+      operationId: createSystemReasonCode
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReasonCodeRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/ReasonCodeMutation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/SettingsConflict' }
+        '503': { $ref: '#/components/responses/SettingsUnavailable' }
+
+  /system/reason-codes/{code}:
+    put:
+      tags: [Settings]
+      summary: 更新标准原因码标签或有效状态
+      description: |
+        需要 `system_settings.manage`、10 分钟内 TOTP Step-up、同源 Origin、CSRF 和幂等键。
+        稳定 code 与 category 不可修改；受保护原因和分类中的最后一个有效原因不能停用。
+      operationId: updateSystemReasonCode
+      security:
+        - adminSession: []
+          csrfToken: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateReasonCodeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/ReasonCodeMutation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/ReasonCodeNotFound' }
+        '409': { $ref: '#/components/responses/SettingsConflict' }
+        '503': { $ref: '#/components/responses/SettingsUnavailable' }
+
   /system/health:
     get:
       tags: [System]
@@ -1288,6 +1410,117 @@ components:
           items: { $ref: '#/components/schemas/AuditEvent' }
         next_cursor: { type: [string, 'null'], maxLength: 512 }
 
+    SecurityPolicy:
+      type: object
+      additionalProperties: false
+      required:
+        - session_idle_minutes
+        - session_absolute_hours
+        - audit_retention_days
+        - revision
+        - updated_by_admin_id
+        - updated_at
+      properties:
+        session_idle_minutes: { type: integer, minimum: 5, maximum: 120 }
+        session_absolute_hours: { type: integer, minimum: 1, maximum: 24 }
+        audit_retention_days: { type: integer, minimum: 365, maximum: 3650 }
+        revision: { type: integer, format: int64, minimum: 1 }
+        updated_by_admin_id: { type: [string, 'null'], format: uuid }
+        updated_at: { type: string, format: date-time }
+
+    UpdateSecurityPolicyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - expected_revision
+        - session_idle_minutes
+        - session_absolute_hours
+        - audit_retention_days
+        - reason_code
+      properties:
+        expected_revision: { type: integer, format: int64, minimum: 1 }
+        session_idle_minutes: { type: integer, minimum: 5, maximum: 120 }
+        session_absolute_hours: { type: integer, minimum: 1, maximum: 24 }
+        audit_retention_days: { type: integer, minimum: 365, maximum: 3650 }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+
+    SecurityPolicyMutationResult:
+      type: object
+      additionalProperties: false
+      required: [operation_id, policy, sessions_revoked]
+      properties:
+        operation_id: { type: string, format: uuid }
+        policy: { $ref: '#/components/schemas/SecurityPolicy' }
+        sessions_revoked: { type: boolean }
+
+    ReasonCategory:
+      type: string
+      enum: [administrator, session, device, account, security]
+
+    ReasonUsage:
+      type: string
+      enum: [administrator, account, device, session, settings]
+
+    ReasonCode:
+      type: object
+      additionalProperties: false
+      required: [code, category, label, active, revision, created_at, updated_at]
+      properties:
+        code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        category: { $ref: '#/components/schemas/ReasonCategory' }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        active: { type: boolean }
+        revision: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ReasonCodePage:
+      type: object
+      additionalProperties: false
+      required: [items, settings_revision]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ReasonCode' }
+        settings_revision: { type: integer, format: int64, minimum: 1 }
+
+    CreateReasonCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, category, label, expected_settings_revision, reason_code]
+      properties:
+        code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        category: { $ref: '#/components/schemas/ReasonCategory' }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        expected_settings_revision: { type: integer, format: int64, minimum: 1 }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+
+    UpdateReasonCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_settings_revision, expected_reason_revision, label, active, reason_code]
+      properties:
+        expected_settings_revision: { type: integer, format: int64, minimum: 1 }
+        expected_reason_revision: { type: integer, format: int64, minimum: 1 }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        active: { type: boolean }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        note: { type: string, maxLength: 500 }
+
+    ReasonCodeMutationResult:
+      type: object
+      additionalProperties: false
+      required: [operation_id, reason, settings_revision]
+      properties:
+        operation_id: { type: string, format: uuid }
+        reason: { $ref: '#/components/schemas/ReasonCode' }
+        settings_revision: { type: integer, format: int64, minimum: 1 }
+
     SystemHealth:
       type: object
       additionalProperties: false
@@ -1332,6 +1565,32 @@ components:
                 - APPROVAL_STATE_CONFLICT
                 - OPERATION_RECONCILING
             message: { type: string }
+
+    SettingsErrorDocument:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - SETTINGS_POLICY_INVALID
+                - SETTINGS_REVISION_CONFLICT
+                - REASON_CODE_ALREADY_EXISTS
+                - REASON_CODE_NOT_FOUND
+                - REASON_CODE_INACTIVE
+                - REASON_CODE_CATEGORY_MISMATCH
+                - REASON_CODE_LAST_ACTIVE
+                - REASON_CODE_PROTECTED
+                - IDEMPOTENCY_KEY_REUSED
+                - SETTINGS_UNAVAILABLE
+            message: { type: string }
+            request_id: { type: string, maxLength: 128 }
 
     StatusDocument:
       type: object
@@ -1394,6 +1653,26 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/AuditEventPage' }
+    SecurityPolicy:
+      description: 当前管理员安全策略及乐观锁版本
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SecurityPolicy' }
+    SecurityPolicyMutation:
+      description: 更新后的策略；会话时长变化时 `sessions_revoked` 为 true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SecurityPolicyMutationResult' }
+    ReasonCodePage:
+      description: 按调用者数据范围过滤后的原因码目录
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ReasonCodePage' }
+    ReasonCodeMutation:
+      description: 创建或更新后的原因码与全局设置版本
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ReasonCodeMutationResult' }
     SystemHealth:
       description: 不包含内部地址或凭据的依赖健康状态
       content:
@@ -1483,6 +1762,37 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorDocument' }
+    SettingsPolicyInvalid:
+      description: 会话策略边界、策略间约束或审计保留期限无效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SettingsErrorDocument' }
+          example: { error: { code: SETTINGS_POLICY_INVALID, message: 安全策略参数无效 } }
+    SettingsConflict:
+      description: 设置版本、幂等键或原因目录状态冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SettingsErrorDocument' }
+          examples:
+            revision: { value: { error: { code: SETTINGS_REVISION_CONFLICT, message: 设置版本已变化，请刷新后重试 } } }
+            idempotency: { value: { error: { code: IDEMPOTENCY_KEY_REUSED, message: 幂等键已用于其他请求 } } }
+            exists: { value: { error: { code: REASON_CODE_ALREADY_EXISTS, message: 原因码已存在 } } }
+            inactive: { value: { error: { code: REASON_CODE_INACTIVE, message: 原因码已停用 } } }
+            category: { value: { error: { code: REASON_CODE_CATEGORY_MISMATCH, message: 原因码不适用于此操作 } } }
+            lastActive: { value: { error: { code: REASON_CODE_LAST_ACTIVE, message: 每个分类必须保留至少一个有效原因码 } } }
+            protected: { value: { error: { code: REASON_CODE_PROTECTED, message: 受保护原因码不能停用 } } }
+    ReasonCodeNotFound:
+      description: 原因码不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SettingsErrorDocument' }
+          example: { error: { code: REASON_CODE_NOT_FOUND, message: 原因码不存在 } }
+    SettingsUnavailable:
+      description: 设置、原因目录、PostgreSQL 或审计依赖不可用；请求失败关闭
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SettingsErrorDocument' }
+          example: { error: { code: SETTINGS_UNAVAILABLE, message: 系统设置服务暂时不可用 } }
     InternalError:
       description: 未归类的内部处理失败；响应不暴露内部错误细节
       content:
