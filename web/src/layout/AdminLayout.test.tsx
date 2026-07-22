@@ -59,6 +59,9 @@ describe('AdminLayout', () => {
       '用户与访问',
       '设备与会话',
       '处置审批',
+      '官方 Agent',
+      '内容审核',
+      '发布与回滚',
       '审计记录',
       '系统设置',
       '服务健康',
@@ -76,6 +79,9 @@ describe('AdminLayout', () => {
     expect(menu.queryByText('内部管理员')).not.toBeInTheDocument();
     expect(menu.queryByText('角色与权限')).not.toBeInTheDocument();
     expect(menu.getByText('用户与访问')).toBeInTheDocument();
+    expect(menu.queryByText('官方 Agent')).not.toBeInTheDocument();
+    expect(menu.queryByText('内容审核')).not.toBeInTheDocument();
+    expect(menu.queryByText('发布与回滚')).not.toBeInTheDocument();
     expect(menu.queryByText('系统设置')).not.toBeInTheDocument();
   });
 
@@ -84,5 +90,24 @@ describe('AdminLayout', () => {
 
     const menu = within(await screen.findByRole('menu'));
     expect(menu.getByText('系统设置')).toBeInTheDocument();
+    expect(menu.getByText('官方 Agent')).toBeInTheDocument();
+    expect(menu.getByText('发布与回滚')).toBeInTheDocument();
+    expect(menu.queryByText('内容审核')).not.toBeInTheDocument();
+  });
+
+  it('shows draft authoring only to Developer and release controls only to Operator', async () => {
+    const developer = renderLayout('developer');
+    let menu = within(await screen.findByRole('menu'));
+    expect(menu.getByText('官方 Agent')).toBeInTheDocument();
+    expect(menu.queryByText('内容审核')).not.toBeInTheDocument();
+    expect(menu.queryByText('发布与回滚')).not.toBeInTheDocument();
+    developer.unmount();
+
+    const operator = renderLayout('operator');
+    menu = within(await screen.findByRole('menu'));
+    expect(menu.getByText('官方 Agent')).toBeInTheDocument();
+    expect(menu.getByText('发布与回滚')).toBeInTheDocument();
+    expect(menu.queryByText('内容审核')).not.toBeInTheDocument();
+    operator.unmount();
   });
 });

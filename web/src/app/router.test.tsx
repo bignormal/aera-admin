@@ -267,6 +267,66 @@ describe('application router', () => {
     expect(screen.queryByRole('heading', { name: '系统安全设置' })).not.toBeInTheDocument();
   });
 
+  it('renders the official Agent catalog for Developer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/v1/me') return sessionResponse('developer');
+      if (path === '/api/v1/official-agents?limit=50') return jsonResponse({ items: [] });
+      throw new Error(`unexpected request: ${path}`);
+    }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/official-agents'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: '官方 Agent' })).toBeVisible();
+    expect(await screen.findByText('没有符合条件的数据')).toBeVisible();
+  });
+
+  it('renders the frozen-submission review page only for Super Admin', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/v1/me') return sessionResponse('super_admin');
+      if (path === '/api/v1/official-agent-submissions?status=pending&limit=50') return jsonResponse({ items: [] });
+      if (path === '/api/v1/official-agent-rollback-requests?view=pending_for_me&limit=50') return jsonResponse({ items: [] });
+      throw new Error(`unexpected request: ${path}`);
+    }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/official-agent-reviews'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: '官方 Agent 审核' })).toBeVisible();
+    expect(await screen.findByText('暂无待审提交')).toBeVisible();
+  });
+
+  it.each([
+    ['support', '/official-agents', '官方 Agent'],
+    ['operator', '/official-agent-reviews', '官方 Agent 审核'],
+    ['developer', '/official-agent-releases', '官方 Agent 发布'],
+  ])('rejects %s direct access to %s', async (role, path, heading) => {
+    vi.stubGlobal('fetch', vi.fn(async () => sessionResponse(role)));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter([path])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('无权访问此页面')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: heading })).not.toBeInTheDocument();
+  });
+
   it.each([
     ['support', '/system/health', '服务健康'],
     ['finance', '/approvals', '处置审批'],

@@ -1,4 +1,37 @@
-import type { APIErrorDocument, AuditEventPage } from './contracts';
+import {
+  officialAuditPageSchema,
+  officialDefinitionPageSchema,
+  officialDefinitionSchema,
+  officialDraftPageSchema,
+  officialDraftSchema,
+  officialDraftValidationSchema,
+  officialOperationSchema,
+  officialReleasePageSchema,
+  officialReleaseSchema,
+  officialRollbackApprovalSchema,
+  officialRollbackPageSchema,
+  officialSubmissionPageSchema,
+  officialSubmissionSchema,
+  officialVersionPageSchema,
+  type APIErrorDocument,
+  type AuditEventPage,
+  type OfficialAuditPage,
+  type OfficialDefinition,
+  type OfficialDefinitionPage,
+  type OfficialDraft,
+  type OfficialDraftPage,
+  type OfficialDraftValidation,
+  type OfficialMutationEnvelope,
+  type OfficialOperation,
+  type OfficialRelease,
+  type OfficialReleasePage,
+  type OfficialRollbackApproval,
+  type OfficialRollbackInput,
+  type OfficialRollbackPage,
+  type OfficialSubmission,
+  type OfficialSubmissionPage,
+  type OfficialVersionPage,
+} from './contracts';
 
 const apiRoot = '/api/v1';
 const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
@@ -129,7 +162,155 @@ export async function putIdempotentJSON<T>(
   });
 }
 
+export async function patchIdempotentJSON<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey: string,
+): Promise<T> {
+  if (!idempotencyKeyPattern.test(idempotencyKey)) throw new Error('Invalid idempotency key');
+  return request<T>(path, {
+    method: 'PATCH',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
 export function listAuditEvents(query: URLSearchParams): Promise<AuditEventPage> {
   const encoded = query.toString();
   return request<AuditEventPage>(`/audit-events${encoded ? `?${encoded}` : ''}`);
+}
+
+function parseOfficial<T>(schema: { safeParse: (value: unknown) => { success: boolean; data?: T } }, value: unknown): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new Error('official Agent response is invalid');
+  return parsed.data as T;
+}
+
+function officialPagePath(path: string, query?: URLSearchParams): string {
+  const encoded = query?.toString() ?? '';
+  return `${path}${encoded ? `?${encoded}` : ''}`;
+}
+
+export async function getOfficialDefinitions(query?: URLSearchParams): Promise<OfficialDefinitionPage> {
+  return parseOfficial(officialDefinitionPageSchema, await request<unknown>(officialPagePath('/official-agents', query)));
+}
+
+export async function getOfficialDefinition(id: string): Promise<OfficialDefinition> {
+  return parseOfficial(officialDefinitionSchema, await request<unknown>(`/official-agents/${encodeURIComponent(id)}`));
+}
+
+export async function getOfficialDrafts(query?: URLSearchParams): Promise<OfficialDraftPage> {
+  return parseOfficial(officialDraftPageSchema, await request<unknown>(officialPagePath('/official-agent-drafts', query)));
+}
+
+export async function getOfficialDraft(id: string): Promise<OfficialDraft> {
+  return parseOfficial(officialDraftSchema, await request<unknown>(`/official-agent-drafts/${encodeURIComponent(id)}`));
+}
+
+export async function getOfficialDraftValidation(id: string): Promise<OfficialDraftValidation> {
+  return parseOfficial(
+    officialDraftValidationSchema,
+    await request<unknown>(`/official-agent-drafts/${encodeURIComponent(id)}/validate`, { method: 'POST' }),
+  );
+}
+
+export async function getOfficialSubmissions(query?: URLSearchParams): Promise<OfficialSubmissionPage> {
+  return parseOfficial(
+    officialSubmissionPageSchema,
+    await request<unknown>(officialPagePath('/official-agent-submissions', query)),
+  );
+}
+
+export async function getOfficialSubmission(id: string): Promise<OfficialSubmission> {
+  return parseOfficial(
+    officialSubmissionSchema,
+    await request<unknown>(`/official-agent-submissions/${encodeURIComponent(id)}`),
+  );
+}
+
+export async function getOfficialVersions(query?: URLSearchParams): Promise<OfficialVersionPage> {
+  return parseOfficial(
+    officialVersionPageSchema,
+    await request<unknown>(officialPagePath('/official-agent-versions', query)),
+  );
+}
+
+export async function getOfficialReleases(query?: URLSearchParams): Promise<OfficialReleasePage> {
+  return parseOfficial(
+    officialReleasePageSchema,
+    await request<unknown>(officialPagePath('/official-agent-releases', query)),
+  );
+}
+
+export async function getOfficialRelease(id: string): Promise<OfficialRelease> {
+  return parseOfficial(
+    officialReleaseSchema,
+    await request<unknown>(`/official-agent-releases/${encodeURIComponent(id)}`),
+  );
+}
+
+export async function getOfficialRollbacks(query?: URLSearchParams): Promise<OfficialRollbackPage> {
+  return parseOfficial(
+    officialRollbackPageSchema,
+    await request<unknown>(officialPagePath('/official-agent-rollback-requests', query)),
+  );
+}
+
+export async function getOfficialAudit(query?: URLSearchParams): Promise<OfficialAuditPage> {
+  return parseOfficial(
+    officialAuditPageSchema,
+    await request<unknown>(officialPagePath('/official-agent-audit-events', query)),
+  );
+}
+
+export async function postOfficialMutation<Payload>(
+  path: string,
+  body: OfficialMutationEnvelope<Payload>,
+  idempotencyKey: string,
+): Promise<OfficialOperation> {
+  return parseOfficial(
+    officialOperationSchema,
+    await postIdempotentJSON<unknown>(path, body, idempotencyKey),
+  );
+}
+
+export async function patchOfficialMutation<Payload>(
+  path: string,
+  body: OfficialMutationEnvelope<Payload>,
+  idempotencyKey: string,
+): Promise<OfficialOperation> {
+  return parseOfficial(
+    officialOperationSchema,
+    await patchIdempotentJSON<unknown>(path, body, idempotencyKey),
+  );
+}
+
+export async function requestOfficialRollback(
+  releaseID: string,
+  body: OfficialRollbackInput,
+  idempotencyKey: string,
+): Promise<OfficialRollbackApproval> {
+  return parseOfficial(
+    officialRollbackApprovalSchema,
+    await postIdempotentJSON<unknown>(
+      `/official-agent-releases/${encodeURIComponent(releaseID)}/rollback-requests`,
+      body,
+      idempotencyKey,
+    ),
+  );
+}
+
+export async function decideOfficialRollback(
+  approvalID: string,
+  decision: 'approve' | 'reject' | 'cancel',
+  idempotencyKey: string,
+): Promise<OfficialRollbackApproval> {
+  return parseOfficial(
+    officialRollbackApprovalSchema,
+    await postIdempotentJSON<unknown>(
+      `/official-agent-rollback-requests/${encodeURIComponent(approvalID)}/${decision}`,
+      {},
+      idempotencyKey,
+    ),
+  );
 }

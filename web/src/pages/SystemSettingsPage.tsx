@@ -108,6 +108,7 @@ const categoryLabels: Record<ReasonCategory, string> = {
   device: '设备',
   account: '账号',
   security: '安全',
+  official_agent: '官方 Agent',
 };
 
 const categoryOptions = (Object.entries(categoryLabels) as Array<[ReasonCategory, string]>).map(

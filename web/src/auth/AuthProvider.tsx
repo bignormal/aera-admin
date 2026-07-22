@@ -89,6 +89,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       'activation-preparation', 'administrators', 'admin-operation', 'approval-request',
       'approval-requests', 'audit-events', 'cloud-users', 'cloud-user', 'cloud-user-devices',
       'cloud-user-sessions', 'system-health', 'system-settings', 'reason-codes',
+      'official-definitions', 'official-definition', 'official-drafts', 'official-submissions',
+      'official-versions', 'official-releases', 'official-rollbacks', 'official-audit',
     ]) {
       queryClient.removeQueries({ queryKey: [key] });
     }

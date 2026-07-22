@@ -20,6 +20,10 @@ const ApprovalsPage = lazy(() => import('../pages/ApprovalsPage').then((module) 
 const AuditPage = lazy(() => import('../pages/AuditPage').then((module) => ({ default: module.AuditPage })));
 const SystemSettingsPage = lazy(() => import('../pages/SystemSettingsPage').then((module) => ({ default: module.SystemSettingsPage })));
 const SystemHealthPage = lazy(() => import('../pages/SystemHealthPage').then((module) => ({ default: module.SystemHealthPage })));
+const OfficialAgentsPage = lazy(() => import('../pages/OfficialAgentsPage').then((module) => ({ default: module.OfficialAgentsPage })));
+const OfficialAgentEditorPage = lazy(() => import('../pages/OfficialAgentEditorPage').then((module) => ({ default: module.OfficialAgentEditorPage })));
+const OfficialAgentReviewsPage = lazy(() => import('../pages/OfficialAgentReviewsPage').then((module) => ({ default: module.OfficialAgentReviewsPage })));
+const OfficialAgentReleasesPage = lazy(() => import('../pages/OfficialAgentReleasesPage').then((module) => ({ default: module.OfficialAgentReleasesPage })));
 
 function suspended(content: ReactNode) {
   return <Suspense fallback={<FullPageLoader />}>{content}</Suspense>;
@@ -53,6 +57,22 @@ const routes: RouteObject[] = [
       {
         path: 'approvals',
         element: <RequirePermission anyOf={['account_lifecycle.initiate', 'account_lifecycle.approve']}>{suspended(<ApprovalsPage />)}</RequirePermission>,
+      },
+      {
+        path: 'official-agents',
+        element: <RequirePermission permission="official_agent.read">{suspended(<OfficialAgentsPage />)}</RequirePermission>,
+      },
+      {
+        path: 'official-agents/:definitionID/edit',
+        element: <RequirePermission permission="official_agent.draft.manage">{suspended(<OfficialAgentEditorPage />)}</RequirePermission>,
+      },
+      {
+        path: 'official-agent-reviews',
+        element: <RequirePermission permission="official_agent.review">{suspended(<OfficialAgentReviewsPage />)}</RequirePermission>,
+      },
+      {
+        path: 'official-agent-releases',
+        element: <RequirePermission anyOf={['official_agent.release.manage', 'official_agent.rollback.request', 'official_agent.audit.read']}>{suspended(<OfficialAgentReleasesPage />)}</RequirePermission>,
       },
       {
         path: 'audit',

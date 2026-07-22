@@ -122,6 +122,13 @@ describe('AuthProvider session ordering', () => {
       ['approval-request', 'approval-1'],
       ['admin-operation', 'operation-1'],
       ['activation-preparation'],
+      ['official-definitions'],
+      ['official-drafts'],
+      ['official-submissions', 'pending'],
+      ['official-versions'],
+      ['official-releases'],
+      ['official-rollbacks', 'mine'],
+      ['official-audit'],
     ] as const;
     for (const key of scopedKeys) queryClient.setQueryData(key, { secret: 'must-not-survive' });
 

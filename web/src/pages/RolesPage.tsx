@@ -27,6 +27,13 @@ const permissionLabels: Record<Permission, { group: string; label: string }> = {
   'service_health.read': { group: '系统', label: '查看服务健康' },
   'system_settings.read': { group: '系统设置', label: '查看安全策略与原因目录' },
   'system_settings.manage': { group: '系统设置', label: '管理安全策略与原因目录' },
+  'official_agent.read': { group: '官方 Agent', label: '查看官方 Agent 资产' },
+  'official_agent.draft.manage': { group: '官方 Agent', label: '创建与提交草稿' },
+  'official_agent.review': { group: '官方 Agent', label: '审核并发布不可变版本' },
+  'official_agent.release.manage': { group: '官方 Agent', label: '管理发布与灰度' },
+  'official_agent.rollback.request': { group: '官方 Agent', label: '发起回滚审批' },
+  'official_agent.rollback.approve': { group: '官方 Agent', label: '批准回滚审批' },
+  'official_agent.audit.read': { group: '官方 Agent', label: '查看完整官方审计' },
 };
 
 interface PermissionRow {
@@ -41,12 +48,12 @@ const rows: PermissionRow[] = permissions.map((permission) => ({
 }));
 
 const roleDescriptions: Record<AdminRole, string> = {
-  super_admin: '管理员安全、审批与系统策略管理',
-  developer: '技术诊断与服务健康',
-  operator: '日常运营处置的发起方',
+  super_admin: '管理员安全、内容审核、回滚批准与系统策略管理',
+  developer: '官方 Agent 草稿开发、技术诊断与服务健康',
+  operator: '日常运营处置、官方发布与回滚发起方',
   support: '用户、设备与会话支持',
   finance: '一期不授予安全控制台权限',
-  auditor: '只读管理员、审计、健康与系统设置',
+  auditor: '只读管理员、官方资产与审计、健康与系统设置',
 };
 
 export function RolesPage() {
