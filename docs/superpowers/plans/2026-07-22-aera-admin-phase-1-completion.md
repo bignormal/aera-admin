@@ -36,7 +36,7 @@
 
 - [ ] **Step 1: Write failing migration assertions**
 
-Add integration assertions that the singleton is seeded with `(30, 8, 730, 1)`, both protected security reasons exist and are active, `reason_codes.revision` is positive, and `admin_settings_idempotency` rejects duplicate actor/action/key HMAC tuples.
+Add integration assertions that the singleton is seeded with `(30, 8, 730, 1)`, both protected security reasons exist and are active, `reason_codes.revision` is positive, code/category updates are rejected by PostgreSQL, and `admin_settings_idempotency` rejects duplicate actor/action/key HMAC tuples.
 
 ```go
 var idleMinutes, absoluteHours, retentionDays int
@@ -84,7 +84,7 @@ Expected: compilation failure because the permissions do not exist.
 
 - [ ] **Step 5: Add the constrained migration and RBAC constants**
 
-The migration must create the singleton and idempotency tables, add a positive reason revision, seed protected reasons, constrain settings bounds, constrain supported mutation actions, and store only HMAC/digest values.
+The migration must create the singleton and idempotency tables, add a positive reason revision, seed protected reasons, constrain settings bounds, constrain supported mutation actions, store only HMAC/digest values, add a trigger that rejects reason code/category changes, and add created/event/outcome/reason audit query indexes.
 
 ```go
 const (
