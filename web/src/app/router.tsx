@@ -8,7 +8,6 @@ import { lazy, Suspense, type ReactNode } from 'react';
 
 import { RequirePermission, ProtectedRoute, FullPageLoader } from '../auth/PermissionGate';
 import { AdminLayout } from '../layout/AdminLayout';
-import { ModulePlaceholderPage } from '../pages/ModulePlaceholderPage';
 
 const LoginPage = lazy(() => import('../pages/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ActivatePage = lazy(() => import('../pages/ActivatePage').then((module) => ({ default: module.ActivatePage })));
@@ -18,6 +17,7 @@ const RolesPage = lazy(() => import('../pages/RolesPage').then((module) => ({ de
 const CloudUsersPage = lazy(() => import('../pages/CloudUsersPage').then((module) => ({ default: module.CloudUsersPage })));
 const CloudDevicesPage = lazy(() => import('../pages/CloudDevicesPage').then((module) => ({ default: module.CloudDevicesPage })));
 const ApprovalsPage = lazy(() => import('../pages/ApprovalsPage').then((module) => ({ default: module.ApprovalsPage })));
+const AuditPage = lazy(() => import('../pages/AuditPage').then((module) => ({ default: module.AuditPage })));
 const SystemHealthPage = lazy(() => import('../pages/SystemHealthPage').then((module) => ({ default: module.SystemHealthPage })));
 
 function suspended(content: ReactNode) {
@@ -55,7 +55,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'audit',
-        element: <RequirePermission anyOf={['audit.read_full', 'audit.read_own']}><ModulePlaceholderPage title="审计记录" /></RequirePermission>,
+        element: <RequirePermission anyOf={['audit.read_full', 'audit.read_own']}>{suspended(<AuditPage />)}</RequirePermission>,
       },
       {
         path: 'system/health',

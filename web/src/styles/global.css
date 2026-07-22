@@ -369,6 +369,14 @@ input {
   padding: 12px 14px;
 }
 
+.audit-page .filter-card form {
+  width: 100%;
+}
+
+.audit-page .filter-card .ant-form-item {
+  margin-bottom: 0;
+}
+
 .filter-control {
   display: flex;
   min-width: 170px;

@@ -1,4 +1,4 @@
-import type { APIErrorDocument } from './contracts';
+import type { APIErrorDocument, AuditEventPage } from './contracts';
 
 const apiRoot = '/api/v1';
 const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
@@ -114,4 +114,9 @@ export async function postIdempotentJSON<T>(
 
 export function putJSON<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export function listAuditEvents(query: URLSearchParams): Promise<AuditEventPage> {
+  const encoded = query.toString();
+  return request<AuditEventPage>(`/audit-events${encoded ? `?${encoded}` : ''}`);
 }

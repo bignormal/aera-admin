@@ -170,6 +170,30 @@ describe('application router', () => {
     expect(screen.getByText('审批结论与 Cloud 执行结果分别展示；批准不代表处置已经成功。')).toBeVisible();
   });
 
+  it('renders the real scoped audit console for auditors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path === '/api/v1/me') return sessionResponse('auditor');
+        if (path === '/api/v1/audit-events?limit=20') return jsonResponse({ items: [], next_cursor: null });
+        throw new Error(`unexpected request: ${path}`);
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <RouterProvider router={createAppRouter(['/audit'])} />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: '审计记录' })).toBeVisible();
+    expect(await screen.findByText('可查看全部管理员审计记录')).toBeVisible();
+    expect(await screen.findByText('没有符合条件的审计记录')).toBeVisible();
+  });
+
   it('renders the real safe health console for developers', async () => {
     vi.stubGlobal(
       'fetch',

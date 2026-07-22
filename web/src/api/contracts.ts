@@ -285,3 +285,30 @@ export interface ReasonInput {
   ticket_reference: string;
   note: string;
 }
+
+export type AuditOutcome = 'success' | 'failure' | 'denied';
+
+export interface AuditEvent {
+  id: string;
+  actor_admin_id: string | null;
+  actor_role?: AdminRole;
+  event_type: string;
+  object_type: string;
+  object_id: string | null;
+  outcome: AuditOutcome;
+  reason_code?: string;
+  ticket_reference?: string;
+  note?: string;
+  approval_id: string | null;
+  operation_id: string | null;
+  error_code?: string;
+  before_state?: Record<string, string>;
+  after_state?: Record<string, string>;
+  request_id: string;
+  created_at: string;
+}
+
+export interface AuditEventPage {
+  items: AuditEvent[];
+  next_cursor: string | null;
+}
