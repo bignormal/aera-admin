@@ -135,6 +135,58 @@ func TestOfficialOutboxPersistsCanonicalPayloadAndRejectsSemanticReplay(t *testi
 	}
 }
 
+func TestOfficialRollbackOutboxUsesDedicatedApprovalReference(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	recorder, err := audit.NewService(postgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requester := seedActor(t, postgres, rbac.Operator)
+	approver := seedActor(t, postgres, rbac.SuperAdmin)
+	repository, err := newRepository(postgres, bytes.Repeat([]byte{9}, 32), recorder, fixedClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalID, releaseID, versionID, revisionID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	_, err = postgres.Exec(context.Background(), `
+		INSERT INTO official_agent_rollback_requests (
+			id, release_id, target_version_id, target_release_revision_id,
+			expected_head_revision, target_digest, requested_by_admin_id,
+			reason_code, approval_status, execution_status, expires_at,
+			created_at, updated_at, version
+		) VALUES ($1, $2, $3, $4, 4, $5, $6, 'official_release_rollback',
+			'pending_review', 'not_started', $7, $8, $8, 1)
+	`, approvalID, releaseID, versionID, revisionID, bytes.Repeat([]byte{8}, 32), requester.AdminID,
+		fixedClock().Add(time.Hour), fixedClock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(OfficialReleaseRollbackPayload{
+		TargetVersionID: versionID.String(), TargetReleaseRevisionID: revisionID.String(),
+		RequesterAdminID: requester.AdminID.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := repository.Enqueue(context.Background(), EnqueueRequest{
+		Actor: approver, Action: OfficialReleaseRollback, TargetID: releaseID, ExpectedRevision: 4,
+		Payload: payload, BrowserIdempotencyKey: uuid.NewString(), OfficialRollbackRequestID: &approvalID,
+		Reason: admin.ActionReason{Code: "official_release_rollback", Meta: approver.Meta},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accountApprovalID, officialApprovalID *uuid.UUID
+	if err := postgres.QueryRow(context.Background(), `
+		SELECT approval_id, official_rollback_request_id FROM admin_outbox WHERE operation_id = $1
+	`, result.OperationID).Scan(&accountApprovalID, &officialApprovalID); err != nil {
+		t.Fatal(err)
+	}
+	if accountApprovalID != nil || officialApprovalID == nil || *officialApprovalID != approvalID {
+		t.Fatalf("approval references = account:%v official:%v", accountApprovalID, officialApprovalID)
+	}
+}
+
 func seedActor(t *testing.T, postgres *pgxpool.Pool, role rbac.Role) admin.Actor {
 	t.Helper()
 	id := uuid.New()

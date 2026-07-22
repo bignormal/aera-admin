@@ -122,16 +122,17 @@ func (repository *repository) EnqueueTx(ctx context.Context, tx pgx.Tx, request 
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO admin_outbox (
-			operation_id, action, target_id, approval_id, actor_admin_id, actor_role,
+			operation_id, action, target_id, approval_id, official_rollback_request_id,
+			actor_admin_id, actor_role,
 			idempotency_key_hmac, expected_revision, command_payload, command_payload_digest,
 			reason_code, ticket_reference, note, request_id, status, attempts,
 			available_at, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, ''),
-			NULLIF($13, ''), $14, 'queued', 0, $15, $15, $15
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''),
+			NULLIF($14, ''), $15, 'queued', 0, $16, $16, $16
 		)
-	`, operationID, request.Action, request.TargetID, request.ApprovalID, request.Actor.AdminID,
-		request.Actor.Role, keyDigest, request.ExpectedRevision, canonicalPayload, payloadDigest[:],
+	`, operationID, request.Action, request.TargetID, request.ApprovalID, request.OfficialRollbackRequestID,
+		request.Actor.AdminID, request.Actor.Role, keyDigest, request.ExpectedRevision, canonicalPayload, payloadDigest[:],
 		request.Reason.Code, request.Reason.TicketReference, request.Reason.Note,
 		request.Reason.Meta.RequestID, now)
 	if err != nil {
@@ -147,7 +148,7 @@ func (repository *repository) EnqueueTx(ctx context.Context, tx pgx.Tx, request 
 		ReasonCode:      request.Reason.Code,
 		TicketReference: request.Reason.TicketReference,
 		Note:            request.Reason.Note,
-		ApprovalID:      request.ApprovalID,
+		ApprovalID:      request.approvalReference(),
 		OperationID:     &operationID,
 		AfterState:      map[string]string{"execution_status": "queued"},
 		RequestID:       request.Reason.Meta.RequestID,
@@ -213,6 +214,7 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 		FROM candidates
 		WHERE outbox.operation_id = candidates.operation_id
 		RETURNING outbox.operation_id, outbox.action, outbox.target_id, outbox.approval_id,
+			outbox.official_rollback_request_id,
 			outbox.actor_admin_id, outbox.actor_role, outbox.expected_revision,
 			outbox.command_payload, outbox.command_payload_digest, outbox.reason_code,
 			COALESCE(outbox.ticket_reference, ''), COALESCE(outbox.note, ''),
@@ -228,6 +230,7 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 		var payloadDigestBytes []byte
 		if err := rows.Scan(
 			&job.OperationID, &job.Action, &job.TargetID, &job.ApprovalID,
+			&job.OfficialRollbackRequestID,
 			&job.ActorAdminID, &job.ActorRole, &job.ExpectedRevision,
 			&job.Payload, &payloadDigestBytes, &job.ReasonCode,
 			&job.TicketReference, &job.Note, &job.RequestID, &job.Attempts, &job.State,
@@ -242,6 +245,8 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 		canonicalPayload, payloadDigest, payloadErr := canonicalCommandPayload(job.Action, job.Payload)
 		if job.OperationID == uuid.Nil || !job.Action.Valid() || job.TargetID == uuid.Nil ||
 			job.ActorAdminID == uuid.Nil || !job.ActorRole.Valid() || job.ExpectedRevision <= 0 ||
+			(job.ApprovalID != nil && job.OfficialRollbackRequestID != nil) ||
+			(job.Action == OfficialReleaseRollback) != (job.OfficialRollbackRequestID != nil) ||
 			job.Attempts < 1 || (job.State != StateQueued && job.State != StateReconciling) ||
 			len(payloadDigestBytes) != sha256.Size || payloadErr != nil ||
 			!bytes.Equal(canonicalPayload, job.Payload) || payloadDigest != job.PayloadDigest {
@@ -265,7 +270,7 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 		if err != nil || command.RowsAffected() != 1 {
 			return nil, ErrStateConflict
 		}
-		if job.ApprovalID != nil && job.State == StateQueued {
+		if job.approvalReference() != nil && job.State == StateQueued {
 			if err := sink.ApplyExecutionTx(ctx, tx, job.OperationID, StateExecuting, "", job.RequestID, now); err != nil {
 				return nil, err
 			}
@@ -280,7 +285,7 @@ func (repository *repository) Claim(ctx context.Context, limit int, lease time.D
 			ReasonCode:      job.ReasonCode,
 			TicketReference: job.TicketReference,
 			Note:            job.Note,
-			ApprovalID:      job.ApprovalID,
+			ApprovalID:      job.approvalReference(),
 			OperationID:     &job.OperationID,
 			BeforeState:     map[string]string{"execution_status": string(job.State)},
 			AfterState:      map[string]string{"execution_status": "executing"},
@@ -353,7 +358,7 @@ func (repository *repository) Transition(
 	if err != nil || command.RowsAffected() != 1 {
 		return ErrStateConflict
 	}
-	if job.ApprovalID != nil {
+	if job.approvalReference() != nil {
 		if err := sink.ApplyExecutionTx(ctx, tx, job.OperationID, nextState, errorCode, job.RequestID, now); err != nil {
 			return err
 		}
@@ -373,7 +378,7 @@ func (repository *repository) Transition(
 		ReasonCode:      job.ReasonCode,
 		TicketReference: job.TicketReference,
 		Note:            job.Note,
-		ApprovalID:      job.ApprovalID,
+		ApprovalID:      job.approvalReference(),
 		OperationID:     &job.OperationID,
 		BeforeState:     map[string]string{"execution_status": "executing"},
 		AfterState:      map[string]string{"execution_status": string(nextState)},

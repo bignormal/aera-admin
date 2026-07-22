@@ -103,7 +103,7 @@ func TestOfficialPayloadCanonicalizationIsStrictAndDeterministic(t *testing.T) {
 
 func TestEveryOfficialActionHasTypedCanonicalPayloadAndPermission(t *testing.T) {
 	manifest, bundle := validOfficialPayloadFixture()
-	definitionID, versionID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	definitionID, versionID, revisionID, requesterID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	encode := func(value any) json.RawMessage {
 		encoded, err := json.Marshal(value)
 		if err != nil {
@@ -137,7 +137,7 @@ func TestEveryOfficialActionHasTypedCanonicalPayloadAndPermission(t *testing.T) 
 		{OfficialReleasePause, json.RawMessage(`{}`), rbac.ManageOfficialReleases},
 		{OfficialReleaseResume, json.RawMessage(`{}`), rbac.ManageOfficialReleases},
 		{OfficialReleaseRollback, encode(OfficialReleaseRollbackPayload{
-			TargetVersionID: versionID, TargetReleaseRevisionID: revisionID,
+			TargetVersionID: versionID, TargetReleaseRevisionID: revisionID, RequesterAdminID: requesterID,
 		}), rbac.ApproveOfficialRollback},
 	}
 	for _, test := range tests {

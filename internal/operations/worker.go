@@ -3,11 +3,13 @@ package operations
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
+	"github.com/google/uuid"
 )
 
 type WorkerConfig struct {
@@ -127,6 +129,44 @@ func (worker *Worker) process(ctx context.Context, job Job) error {
 		operation, err = worker.cloud.DisableUser(ctx, job.TargetID, meta)
 	case EnableUser:
 		operation, err = worker.cloud.EnableUser(ctx, job.TargetID, meta)
+	case OfficialDefinitionReserve, OfficialDraftCreate, OfficialDraftUpdate,
+		OfficialDraftSubmit, OfficialSubmissionWithdraw, OfficialSubmissionReview,
+		OfficialReleaseActivate, OfficialReleaseRollout, OfficialReleasePause,
+		OfficialReleaseResume:
+		operation, err = worker.cloud.ExecuteOfficialCommand(ctx, cloudadmin.ActorContext{
+			AdminID: job.ActorAdminID, Role: job.ActorRole, OperationID: &job.OperationID,
+		}, cloudadmin.OfficialCommand{
+			Action: cloudadmin.OfficialAction(job.Action), TargetID: job.TargetID,
+			ExpectedRevision: job.ExpectedRevision, ReasonCode: job.ReasonCode,
+			TicketReference: job.TicketReference, Payload: job.Payload,
+		})
+	case OfficialReleaseRollback:
+		var payload OfficialReleaseRollbackPayload
+		if decodeStrictCommandJSON(job.Payload, &payload) != nil {
+			err = cloudadmin.ErrContractViolation
+			break
+		}
+		requesterID, parseErr := uuid.Parse(payload.RequesterAdminID)
+		if parseErr != nil || requesterID == uuid.Nil || requesterID == job.ActorAdminID || job.OfficialRollbackRequestID == nil {
+			err = cloudadmin.ErrContractViolation
+			break
+		}
+		cloudPayload, marshalErr := json.Marshal(struct {
+			TargetVersionID         string `json:"target_version_id"`
+			TargetReleaseRevisionID string `json:"target_release_revision_id"`
+		}{payload.TargetVersionID, payload.TargetReleaseRevisionID})
+		if marshalErr != nil {
+			err = cloudadmin.ErrContractViolation
+			break
+		}
+		operation, err = worker.cloud.ExecuteOfficialCommand(ctx, cloudadmin.ActorContext{
+			AdminID: job.ActorAdminID, Role: job.ActorRole, OperationID: &job.OperationID,
+			ApprovalID: job.OfficialRollbackRequestID, RequesterAdminID: &requesterID,
+		}, cloudadmin.OfficialCommand{
+			Action: cloudadmin.OfficialReleaseRollback, TargetID: job.TargetID,
+			ExpectedRevision: job.ExpectedRevision, ReasonCode: job.ReasonCode,
+			TicketReference: job.TicketReference, Payload: cloudPayload,
+		})
 	default:
 		err = cloudadmin.ErrContractViolation
 	}
@@ -184,6 +224,10 @@ func stableExecutionError(err error) string {
 		return "CLOUD_NOT_CONFIGURED"
 	case errors.Is(err, cloudadmin.ErrContractViolation):
 		return "CLOUD_CONTRACT_VIOLATION"
+	case errors.Is(err, cloudadmin.ErrPermissionDenied):
+		return "CLOUD_PERMISSION_DENIED"
+	case errors.Is(err, cloudadmin.ErrPublicationDLPBlocked):
+		return "PUBLICATION_DLP_BLOCKED"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "CLOUD_TIMEOUT"
 	default:

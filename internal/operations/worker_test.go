@@ -3,7 +3,10 @@ package operations
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +55,36 @@ func TestWorkerReconcilesUnknownResultWithoutChangingOperationID(t *testing.T) {
 	if !slices.Equal(fixture.cloud.commandOperationIDs, []uuid.UUID{accepted.OperationID}) ||
 		!slices.Equal(fixture.cloud.queriedOperationIDs, []uuid.UUID{accepted.OperationID}) {
 		t.Fatalf("operation IDs = commands:%v queries:%v", fixture.cloud.commandOperationIDs, fixture.cloud.queriedOperationIDs)
+	}
+}
+
+func TestWorkerReconcilesOfficialReviewTimeoutWithoutFabricatingSuccess(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	fixture := newWorkerFixture(t, postgres)
+	fixture.actor = seedActor(t, postgres, rbac.SuperAdmin)
+	accepted := fixture.enqueueOfficial(t, OfficialSubmissionReview, json.RawMessage(`{"decision":"reject","review_reason_code":"policy_mismatch","safe_note":"Use approved policy."}`))
+	fixture.cloud.officialErrors = []error{cloudadmin.ErrUnavailable}
+	fixture.cloud.operationResults = []cloudResult{{operation: cloudadmin.Operation{
+		ID: accepted.OperationID, Status: cloudadmin.OperationSucceeded, UpdatedAt: fixture.clock().Add(time.Second),
+	}}}
+
+	if err := fixture.worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := fixture.operations.Get(context.Background(), fixture.actor, accepted.OperationID)
+	if err != nil || first.State != StateReconciling {
+		t.Fatalf("first official state = %+v, %v", first, err)
+	}
+	fixture.advance(2 * time.Second)
+	if err := fixture.worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	final, err := fixture.operations.Get(context.Background(), fixture.actor, accepted.OperationID)
+	if err != nil || final.State != StateSucceeded {
+		t.Fatalf("final official state = %+v, %v", final, err)
+	}
+	if len(fixture.cloud.officialCommands) != 1 || !slices.Equal(fixture.cloud.queriedOperationIDs, []uuid.UUID{accepted.OperationID}) {
+		t.Fatalf("official dispatch/reconcile = %d/%v", len(fixture.cloud.officialCommands), fixture.cloud.queriedOperationIDs)
 	}
 }
 
@@ -109,6 +142,132 @@ func TestCleanupExpiredDeletesOnlyTerminalOperationPairs(t *testing.T) {
 	}
 }
 
+func TestWorkerDispatchesOfficialCommandWithBoundActor(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	fixture := newWorkerFixture(t, postgres)
+	fixture.actor = seedActor(t, postgres, rbac.Developer)
+	accepted := fixture.enqueueOfficial(t, OfficialDefinitionReserve, json.RawMessage(`{"display_name":"Official Research"}`))
+
+	if err := fixture.worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := fixture.operations.Get(context.Background(), fixture.actor, accepted.OperationID)
+	if err != nil || result.State != StateSucceeded {
+		t.Fatalf("result = %+v, %v", result, err)
+	}
+	if len(fixture.cloud.officialActors) != 1 || len(fixture.cloud.officialCommands) != 1 {
+		t.Fatalf("official calls = actors:%d commands:%d", len(fixture.cloud.officialActors), len(fixture.cloud.officialCommands))
+	}
+	actor, command := fixture.cloud.officialActors[0], fixture.cloud.officialCommands[0]
+	if actor.AdminID != fixture.actor.AdminID || actor.Role != rbac.Developer || actor.OperationID == nil ||
+		*actor.OperationID != accepted.OperationID || command.Action != cloudadmin.OfficialDefinitionReserve ||
+		command.TargetID == uuid.Nil || string(command.Payload) != `{"display_name":"Official Research"}` {
+		t.Fatalf("official actor/command = %+v / %+v", actor, command)
+	}
+}
+
+func TestWorkerDispatchesApprovedOfficialRollbackWithDualControlClaims(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	fixture := newWorkerFixture(t, postgres)
+	requester := seedActor(t, postgres, rbac.Operator)
+	fixture.actor = seedActor(t, postgres, rbac.SuperAdmin)
+	approvalID, releaseID, versionID, revisionID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	_, err := postgres.Exec(context.Background(), `
+		INSERT INTO official_agent_rollback_requests (
+			id, release_id, target_version_id, target_release_revision_id,
+			expected_head_revision, target_digest, requested_by_admin_id,
+			reason_code, approval_status, execution_status, expires_at,
+			created_at, updated_at, version
+		) VALUES ($1, $2, $3, $4, 4, $5, $6, 'official_release_rollback',
+			'pending_review', 'not_started', $7, $8, $8, 1)
+	`, approvalID, releaseID, versionID, revisionID, bytes.Repeat([]byte{8}, 32), requester.AdminID,
+		fixture.clock().Add(time.Hour), fixture.clock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(OfficialReleaseRollbackPayload{
+		TargetVersionID: versionID.String(), TargetReleaseRevisionID: revisionID.String(),
+		RequesterAdminID: requester.AdminID.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := postgres.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := fixture.operations.EnqueueTx(context.Background(), tx, EnqueueRequest{
+		Actor: fixture.actor, Action: OfficialReleaseRollback, TargetID: releaseID, ExpectedRevision: 4,
+		Payload: payload, BrowserIdempotencyKey: uuid.NewString(), OfficialRollbackRequestID: &approvalID,
+		Reason: admin.ActionReason{Code: "official_release_rollback", Meta: fixture.actor.Meta},
+	})
+	if err != nil {
+		_ = tx.Rollback(context.Background())
+		t.Fatal(err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := fixture.operations.Get(context.Background(), fixture.actor, accepted.OperationID)
+	if err != nil || result.State != StateSucceeded {
+		t.Fatalf("result = %+v, %v", result, err)
+	}
+	if len(fixture.cloud.officialActors) != 1 || len(fixture.cloud.officialCommands) != 1 {
+		t.Fatalf("official calls = actors:%d commands:%d", len(fixture.cloud.officialActors), len(fixture.cloud.officialCommands))
+	}
+	actor, command := fixture.cloud.officialActors[0], fixture.cloud.officialCommands[0]
+	if actor.ApprovalID == nil || *actor.ApprovalID != approvalID || actor.RequesterAdminID == nil ||
+		*actor.RequesterAdminID != requester.AdminID || command.Action != cloudadmin.OfficialReleaseRollback ||
+		strings.Contains(string(command.Payload), "requester_admin_id") {
+		t.Fatalf("rollback actor/command = %+v / %+v", actor, command)
+	}
+}
+
+func TestCompositeExecutionSinkRequiresExactlyOneOwner(t *testing.T) {
+	operationID := uuid.New()
+	owner := &executionSinkStub{}
+	missing := &executionSinkStub{err: ErrExecutionTargetNotFound}
+	router, err := CombineExecutionSinks(missing, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.ApplyExecutionTx(context.Background(), nil, operationID, StateExecuting, "", "req-route", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if owner.calls != 1 || missing.calls != 1 {
+		t.Fatalf("sink calls = owner:%d missing:%d", owner.calls, missing.calls)
+	}
+
+	noOwner, err := CombineExecutionSinks(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := noOwner.ApplyExecutionTx(context.Background(), nil, operationID, StateExecuting, "", "req-route", time.Now()); !errors.Is(err, ErrExecutionTargetNotFound) {
+		t.Fatalf("no-owner error = %v", err)
+	}
+
+	duplicateOwner, err := CombineExecutionSinks(&executionSinkStub{}, &executionSinkStub{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := duplicateOwner.ApplyExecutionTx(context.Background(), nil, operationID, StateExecuting, "", "req-route", time.Now()); !errors.Is(err, ErrStateConflict) {
+		t.Fatalf("duplicate-owner error = %v", err)
+	}
+}
+
+func TestStableExecutionErrorPreservesOfficialPolicyFailures(t *testing.T) {
+	if got := stableExecutionError(cloudadmin.ErrPermissionDenied); got != "CLOUD_PERMISSION_DENIED" {
+		t.Fatalf("permission code = %q", got)
+	}
+	if got := stableExecutionError(cloudadmin.ErrPublicationDLPBlocked); got != "PUBLICATION_DLP_BLOCKED" {
+		t.Fatalf("DLP code = %q", got)
+	}
+}
+
 type cloudResult struct {
 	operation cloudadmin.Operation
 	err       error
@@ -121,6 +280,9 @@ type workerCloudStub struct {
 	operationResults    []cloudResult
 	commandOperationIDs []uuid.UUID
 	queriedOperationIDs []uuid.UUID
+	officialActors      []cloudadmin.ActorContext
+	officialCommands    []cloudadmin.OfficialCommand
+	officialErrors      []error
 	now                 func() time.Time
 }
 
@@ -169,10 +331,33 @@ func (stub *workerCloudStub) GetOperation(_ context.Context, id uuid.UUID) (clou
 	return result.operation, result.err
 }
 
+func (stub *workerCloudStub) ExecuteOfficialCommand(_ context.Context, actor cloudadmin.ActorContext, command cloudadmin.OfficialCommand) (cloudadmin.Operation, error) {
+	stub.officialActors = append(stub.officialActors, actor)
+	stub.officialCommands = append(stub.officialCommands, command)
+	if len(stub.officialErrors) > 0 {
+		err := stub.officialErrors[0]
+		stub.officialErrors = stub.officialErrors[1:]
+		return cloudadmin.Operation{}, err
+	}
+	return cloudadmin.Operation{
+		ID: *actor.OperationID, Status: cloudadmin.OperationSucceeded, UpdatedAt: stub.now(),
+	}, nil
+}
+
 type noopExecutionSink struct{}
 
 func (noopExecutionSink) ApplyExecutionTx(context.Context, pgx.Tx, uuid.UUID, State, string, string, time.Time) error {
 	return nil
+}
+
+type executionSinkStub struct {
+	calls int
+	err   error
+}
+
+func (stub *executionSinkStub) ApplyExecutionTx(context.Context, pgx.Tx, uuid.UUID, State, string, string, time.Time) error {
+	stub.calls++
+	return stub.err
 }
 
 type workerFixture struct {
@@ -226,6 +411,27 @@ func (fixture *workerFixture) enqueue(t *testing.T, action Action) Result {
 		Reason:                admin.ActionReason{Code: "suspected_compromise", Meta: fixture.actor.Meta},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func (fixture *workerFixture) enqueueOfficial(t *testing.T, action Action, payload json.RawMessage) Result {
+	t.Helper()
+	tx, err := fixture.operations.repository.postgres.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	result, err := fixture.operations.EnqueueTx(context.Background(), tx, EnqueueRequest{
+		Actor: fixture.actor, Action: action, TargetID: uuid.New(), ExpectedRevision: 1,
+		Payload: payload, BrowserIdempotencyKey: uuid.NewString(),
+		Reason: admin.ActionReason{Code: "official_content_review", Meta: fixture.actor.Meta},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return result

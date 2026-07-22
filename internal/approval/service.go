@@ -472,7 +472,7 @@ func (service *Service) ApplyExecutionTx(
 		&reviewerRole,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return operations.ErrExecutionTargetNotFound
 	}
 	if err != nil || request.Status != Approved || request.OperationID == nil ||
 		*request.OperationID != operationID || reviewerID == nil || reviewerRole != rbac.SuperAdmin ||

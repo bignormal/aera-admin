@@ -123,6 +123,7 @@ type OfficialReleaseRolloutPayload struct {
 type OfficialReleaseRollbackPayload struct {
 	TargetVersionID         string `json:"target_version_id"`
 	TargetReleaseRevisionID string `json:"target_release_revision_id"`
+	RequesterAdminID        string `json:"requester_admin_id"`
 }
 
 func canonicalCommandPayload(action Action, input json.RawMessage) ([]byte, [sha256.Size]byte, error) {
@@ -209,7 +210,8 @@ func validateAndCanonicalizeOfficialPayload(action Action, target any) error {
 		)
 	case OfficialReleaseRollback:
 		payload := target.(*OfficialReleaseRollbackPayload)
-		if !canonicalUUID(payload.TargetVersionID) || !canonicalUUID(payload.TargetReleaseRevisionID) {
+		if !canonicalUUID(payload.TargetVersionID) || !canonicalUUID(payload.TargetReleaseRevisionID) ||
+			!canonicalUUID(payload.RequesterAdminID) {
 			return ErrInvalidRequest
 		}
 		return nil

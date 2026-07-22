@@ -62,8 +62,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 7 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 7/32", migrationCount, checksumLength)
+	if migrationCount != 8 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 8/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int
@@ -219,6 +219,8 @@ func TestOfficialManagedAgentMigrationCreatesTypedOutboxAndAppendOnlyRollback(t 
 		assertCheckConstraintContains(t, ctx, postgres, table, table+"_payload_length_check", "131072")
 		assertCheckConstraint(t, ctx, postgres, table, table+"_payload_digest_length_check")
 	}
+	assertColumnType(t, ctx, postgres, "admin_outbox", "official_rollback_request_id", "uuid")
+	assertCheckConstraintContains(t, ctx, postgres, "admin_outbox", "admin_outbox_single_approval_check", "num_nonnulls")
 	assertCheckConstraintContains(t, ctx, postgres, "reason_codes", "reason_codes_category_check", "official_agent")
 	var officialReasonCount int
 	if err := postgres.QueryRow(ctx, `

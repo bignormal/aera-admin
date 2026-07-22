@@ -19,12 +19,13 @@ import (
 )
 
 var (
-	ErrInvalidRequest       = errors.New("operation request is invalid")
-	ErrPermissionDenied     = errors.New("operation permission is denied")
-	ErrIdempotencyKeyReused = errors.New("idempotency key was reused for another request")
-	ErrOperationNotFound    = errors.New("operation was not found")
-	ErrCloudUnavailable     = errors.New("Cloud administration is unavailable")
-	ErrStateConflict        = errors.New("operation state changed")
+	ErrInvalidRequest          = errors.New("operation request is invalid")
+	ErrPermissionDenied        = errors.New("operation permission is denied")
+	ErrIdempotencyKeyReused    = errors.New("idempotency key was reused for another request")
+	ErrOperationNotFound       = errors.New("operation was not found")
+	ErrCloudUnavailable        = errors.New("Cloud administration is unavailable")
+	ErrStateConflict           = errors.New("operation state changed")
+	ErrExecutionTargetNotFound = errors.New("operation execution target was not found")
 )
 
 var (
@@ -66,14 +67,15 @@ const (
 )
 
 type EnqueueRequest struct {
-	Actor                 admin.Actor
-	Action                Action
-	TargetID              uuid.UUID
-	ExpectedRevision      int64
-	Payload               json.RawMessage
-	Reason                admin.ActionReason
-	BrowserIdempotencyKey string
-	ApprovalID            *uuid.UUID
+	Actor                     admin.Actor
+	Action                    Action
+	TargetID                  uuid.UUID
+	ExpectedRevision          int64
+	Payload                   json.RawMessage
+	Reason                    admin.ActionReason
+	BrowserIdempotencyKey     string
+	ApprovalID                *uuid.UUID
+	OfficialRollbackRequestID *uuid.UUID
 }
 
 type Result struct {
@@ -84,21 +86,22 @@ type Result struct {
 }
 
 type Job struct {
-	OperationID      uuid.UUID
-	Action           Action
-	TargetID         uuid.UUID
-	ApprovalID       *uuid.UUID
-	ActorAdminID     uuid.UUID
-	ActorRole        rbac.Role
-	ExpectedRevision int64
-	Payload          json.RawMessage
-	PayloadDigest    [sha256.Size]byte
-	ReasonCode       string
-	TicketReference  string
-	Note             string
-	RequestID        string
-	Attempts         int
-	State            State
+	OperationID               uuid.UUID
+	Action                    Action
+	TargetID                  uuid.UUID
+	ApprovalID                *uuid.UUID
+	OfficialRollbackRequestID *uuid.UUID
+	ActorAdminID              uuid.UUID
+	ActorRole                 rbac.Role
+	ExpectedRevision          int64
+	Payload                   json.RawMessage
+	PayloadDigest             [sha256.Size]byte
+	ReasonCode                string
+	TicketReference           string
+	Note                      string
+	RequestID                 string
+	Attempts                  int
+	State                     State
 }
 
 type ExecutionSink interface {
@@ -114,7 +117,11 @@ func (request EnqueueRequest) validate() error {
 		audit.ContainsSensitiveText(request.Reason.TicketReference) || audit.ContainsSensitiveText(request.Reason.Note) {
 		return ErrInvalidRequest
 	}
-	if request.ApprovalID != nil && *request.ApprovalID == uuid.Nil {
+	if (request.ApprovalID != nil && *request.ApprovalID == uuid.Nil) ||
+		(request.OfficialRollbackRequestID != nil && *request.OfficialRollbackRequestID == uuid.Nil) ||
+		(request.ApprovalID != nil && request.OfficialRollbackRequestID != nil) ||
+		(request.Action == OfficialReleaseRollback) != (request.OfficialRollbackRequestID != nil) ||
+		(request.ApprovalID != nil && request.Action != DisableUser && request.Action != EnableUser) {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -156,16 +163,34 @@ func permissionFor(action Action) rbac.Permission {
 }
 
 func requestDigest(request EnqueueRequest, payloadDigest [sha256.Size]byte) [sha256.Size]byte {
-	approvalID := ""
+	approvalKind, approvalID := "", ""
 	if request.ApprovalID != nil {
+		approvalKind = "account_lifecycle"
 		approvalID = request.ApprovalID.String()
+	} else if request.OfficialRollbackRequestID != nil {
+		approvalKind = "official_agent_rollback"
+		approvalID = request.OfficialRollbackRequestID.String()
 	}
 	canonical := strings.Join([]string{
 		string(request.Action), request.TargetID.String(), strconv.FormatInt(request.ExpectedRevision, 10),
-		request.Reason.Code, request.Reason.TicketReference, request.Reason.Note, approvalID,
+		request.Reason.Code, request.Reason.TicketReference, request.Reason.Note, approvalKind, approvalID,
 		hex.EncodeToString(payloadDigest[:]),
 	}, "\x00")
 	return sha256.Sum256([]byte(canonical))
+}
+
+func (request EnqueueRequest) approvalReference() *uuid.UUID {
+	if request.ApprovalID != nil {
+		return request.ApprovalID
+	}
+	return request.OfficialRollbackRequestID
+}
+
+func (job Job) approvalReference() *uuid.UUID {
+	if job.ApprovalID != nil {
+		return job.ApprovalID
+	}
+	return job.OfficialRollbackRequestID
 }
 
 func (state State) valid() bool {
