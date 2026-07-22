@@ -64,7 +64,7 @@ func TestInviteRejectsDuplicateIdentityAcrossLookupKeyRotation(t *testing.T) {
 	}
 	rotatedService, err := NewService(ServiceConfig{
 		PostgreSQL: fixture.postgres, Passwords: fixture.passwords, Identities: rotatedIdentities,
-		TOTPSecrets: fixture.secrets, TOTP: fixture.totp, Audit: fixture.audit,
+		TOTPSecrets: fixture.secrets, TOTP: fixture.totp, Audit: fixture.audit, Reasons: fixture.service.reasons,
 		PublicURL: "https://admin.example.test", Clock: func() time.Time { return fixture.now },
 	})
 	if err != nil {

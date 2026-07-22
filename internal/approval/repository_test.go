@@ -14,6 +14,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
 	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/bignormal/aera-admin/internal/testkit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -131,7 +132,8 @@ func newApprovalFixture(t *testing.T, postgres *pgxpool.Pool) *approvalFixture {
 		t.Fatal(err)
 	}
 	service, err := NewService(ServiceConfig{
-		PostgreSQL: postgres, Cloud: cloud, Operations: operationService, Audit: recorder, Clock: approvalClock,
+		PostgreSQL: postgres, Cloud: cloud, Operations: operationService, Audit: recorder,
+		Reasons: mustReasonStore(t, postgres), Clock: approvalClock,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -142,6 +144,15 @@ func newApprovalFixture(t *testing.T, postgres *pgxpool.Pool) *approvalFixture {
 		firstSuperAdmin:  seedApprovalActor(t, postgres, rbac.SuperAdmin, "req-approval-review-1"),
 		secondSuperAdmin: seedApprovalActor(t, postgres, rbac.SuperAdmin, "req-approval-review-2"),
 	}
+}
+
+func mustReasonStore(t *testing.T, postgres *pgxpool.Pool) *settings.Store {
+	t.Helper()
+	store, err := settings.NewStore(postgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
 
 func (fixture *approvalFixture) createPending(t *testing.T) Request {

@@ -10,6 +10,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
 	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +23,12 @@ type ServiceConfig struct {
 	Cloud      cloudadmin.Client
 	Operations operations.TransactionalEnqueuer
 	Audit      *audit.Service
+	Reasons    ReasonValidator
 	Clock      func() time.Time
+}
+
+type ReasonValidator interface {
+	ValidateReason(context.Context, settings.ReasonUsage, string) error
 }
 
 type Service struct {
@@ -30,12 +36,13 @@ type Service struct {
 	cloud      cloudadmin.Client
 	operations operations.TransactionalEnqueuer
 	audit      *audit.Service
+	reasons    ReasonValidator
 	clock      func() time.Time
 }
 
 func NewService(settings ServiceConfig) (*Service, error) {
 	if settings.PostgreSQL == nil || settings.Cloud == nil || settings.Operations == nil ||
-		settings.Audit == nil || settings.Clock == nil {
+		settings.Audit == nil || settings.Reasons == nil || settings.Clock == nil {
 		return nil, errors.New("approval service dependencies are required")
 	}
 	return &Service{
@@ -43,6 +50,7 @@ func NewService(settings ServiceConfig) (*Service, error) {
 		cloud:      settings.Cloud,
 		operations: settings.Operations,
 		audit:      settings.Audit,
+		reasons:    settings.Reasons,
 		clock:      settings.Clock,
 	}, nil
 }
@@ -56,6 +64,12 @@ func (service *Service) Create(ctx context.Context, input CreateRequest) (Reques
 	}
 	if input.Actor.Role != rbac.Operator || !rbac.Allowed(input.Actor.Role, rbac.InitiateAccountLifecycle) {
 		return Request{}, ErrPermissionDenied
+	}
+	if service.reasons == nil {
+		return Request{}, settings.ErrUnavailable
+	}
+	if err := service.reasons.ValidateReason(ctx, settings.UsageAccount, input.Reason.Code); err != nil {
+		return Request{}, err
 	}
 	user, err := service.cloud.GetUser(ctx, input.TargetUserID)
 	if err != nil {

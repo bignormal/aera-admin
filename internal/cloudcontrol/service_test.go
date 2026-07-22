@@ -2,6 +2,7 @@ package cloudcontrol
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,10 +10,44 @@ import (
 	"github.com/bignormal/aera-admin/internal/admin"
 	"github.com/bignormal/aera-admin/internal/audit"
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
+	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/bignormal/aera-admin/internal/testkit"
 	"github.com/google/uuid"
 )
+
+func TestCloudRevocationsValidateReasonBeforeOperationEnqueue(t *testing.T) {
+	validator := &cloudReasonValidatorSpy{err: settings.ErrReasonInactive}
+	service := &Service{operations: &operations.Service{}, reasons: validator}
+	actor := admin.Actor{AdminID: uuid.New(), Role: rbac.Support}
+	reason := admin.ActionReason{Code: "lost_device", Meta: admin.RequestMeta{RequestID: "req-cloud-reason"}}
+
+	if _, err := service.RevokeDevice(context.Background(), actor, uuid.New(), 1, reason, "019f0000-0000-7000-8000-000000000201"); !errors.Is(err, settings.ErrReasonInactive) {
+		t.Fatalf("RevokeDevice() error = %v", err)
+	}
+	if validator.usage != settings.UsageDevice || validator.calls != 1 {
+		t.Fatalf("device reason calls/usage = %d/%s", validator.calls, validator.usage)
+	}
+	if _, err := service.RevokeSession(context.Background(), actor, uuid.New(), 1, reason, "019f0000-0000-7000-8000-000000000202"); !errors.Is(err, settings.ErrReasonInactive) {
+		t.Fatalf("RevokeSession() error = %v", err)
+	}
+	if validator.usage != settings.UsageSession || validator.calls != 2 {
+		t.Fatalf("session reason calls/usage = %d/%s", validator.calls, validator.usage)
+	}
+}
+
+type cloudReasonValidatorSpy struct {
+	err   error
+	usage settings.ReasonUsage
+	calls int
+}
+
+func (validator *cloudReasonValidatorSpy) ValidateReason(_ context.Context, usage settings.ReasonUsage, _ string) error {
+	validator.calls++
+	validator.usage = usage
+	return validator.err
+}
 
 func TestLookupUserAuditsOnlyTheMaskedCloudUserReference(t *testing.T) {
 	postgres := testkit.Postgres(t)

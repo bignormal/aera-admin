@@ -62,6 +62,103 @@ func TestLoginRequiresTOTPBeforeSessionAndRejectsReplay(t *testing.T) {
 	}
 }
 
+func TestSessionPolicyControlsCreationAndRefreshLifetimes(t *testing.T) {
+	fixture := newAuthFixture(t)
+	fixture.service.sessionPolicy = policyReaderStub{idle: 12 * time.Minute, absolute: 3 * time.Hour}
+	login := fixture.login(t)
+
+	var idleExpiresAt, absoluteExpiresAt time.Time
+	if err := fixture.postgres.QueryRow(context.Background(), `
+		SELECT idle_expires_at, absolute_expires_at FROM admin_sessions WHERE id = $1
+	`, login.Principal.SessionID).Scan(&idleExpiresAt, &absoluteExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if !idleExpiresAt.Equal(fixture.now.Add(12*time.Minute)) || !absoluteExpiresAt.Equal(fixture.now.Add(3*time.Hour)) {
+		t.Fatalf("policy expiries = %s/%s", idleExpiresAt, absoluteExpiresAt)
+	}
+
+	fixture.advance(6 * time.Minute)
+	if _, err := fixture.service.Authenticate(context.Background(), login.RawSessionToken); err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if err := fixture.postgres.QueryRow(context.Background(), `
+		SELECT idle_expires_at FROM admin_sessions WHERE id = $1
+	`, login.Principal.SessionID).Scan(&idleExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if !idleExpiresAt.Equal(fixture.now.Add(12 * time.Minute)) {
+		t.Fatalf("refreshed idle expiry = %s, want %s", idleExpiresAt, fixture.now.Add(12*time.Minute))
+	}
+}
+
+func TestSessionPolicyFailurePreventsCreationAndRefresh(t *testing.T) {
+	t.Run("creation", func(t *testing.T) {
+		fixture := newAuthFixture(t)
+		challenge, err := fixture.service.BeginLogin(
+			context.Background(), fixture.email, fixture.password, fixture.meta("req-policy-login"),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.service.sessionPolicy = policyReaderStub{err: errors.New("policy unavailable")}
+		_, err = fixture.service.CompleteLogin(context.Background(), CompleteLoginRequest{
+			ChallengeID: challenge.ID, TOTPCode: fixture.totp.Code(fixture.totpSecret, fixture.now),
+			Meta: fixture.meta("req-policy-totp"),
+		})
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("CompleteLogin() error = %v, want ErrUnavailable", err)
+		}
+		var count int
+		if err := fixture.postgres.QueryRow(context.Background(), `SELECT count(*) FROM admin_sessions`).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("session count/error = %d/%v", count, err)
+		}
+	})
+
+	t.Run("refresh", func(t *testing.T) {
+		fixture := newAuthFixture(t)
+		login := fixture.login(t)
+		fixture.service.sessionPolicy = policyReaderStub{err: errors.New("policy unavailable")}
+		if _, err := fixture.service.Authenticate(context.Background(), login.RawSessionToken); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("Authenticate() error = %v, want ErrUnavailable", err)
+		}
+	})
+}
+
+func TestInvalidateLiveSessionsDeletesAuthOwnedRedisKeys(t *testing.T) {
+	fixture := newAuthFixture(t)
+	login := fixture.login(t)
+	tokenHMAC, ok := fixture.service.tokens.sessionTokenHMAC(login.RawSessionToken)
+	if !ok {
+		t.Fatal("session token did not produce an HMAC")
+	}
+	key := liveSessionKey(fixture.prefix, tokenHMAC)
+	if exists, err := fixture.redis.Exists(context.Background(), key).Result(); err != nil || exists != 1 {
+		t.Fatalf("live-session key exists/error = %d/%v", exists, err)
+	}
+	if err := fixture.service.InvalidateLiveSessions(context.Background(), [][]byte{tokenHMAC}); err != nil {
+		t.Fatalf("InvalidateLiveSessions() error = %v", err)
+	}
+	if exists, err := fixture.redis.Exists(context.Background(), key).Result(); err != nil || exists != 0 {
+		t.Fatalf("live-session key after invalidation/error = %d/%v", exists, err)
+	}
+}
+
+type policyReaderStub struct {
+	idle     time.Duration
+	absolute time.Duration
+	err      error
+}
+
+func (reader policyReaderStub) SessionLifetimes(context.Context) (time.Duration, time.Duration, error) {
+	if reader.err != nil {
+		return 0, 0, reader.err
+	}
+	if reader.idle == 0 {
+		return 30 * time.Minute, 8 * time.Hour, nil
+	}
+	return reader.idle, reader.absolute, nil
+}
+
 func TestBeginLoginUsesGenericErrorsWithoutAccountEnumeration(t *testing.T) {
 	for name, test := range map[string]struct {
 		mutate   func(*authFixture)
@@ -659,7 +756,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 		PostgreSQL: postgres, Redis: redisClient, RedisPrefix: prefix,
 		Passwords: passwords, Identities: identities, TOTPSecrets: secrets, TOTP: totp, Audit: auditService,
 		SessionHMACKey: bytes.Repeat([]byte{4}, 32), CSRFHMACKey: bytes.Repeat([]byte{5}, 32),
-		Clock: func() time.Time { return clockNow },
+		SessionPolicy: policyReaderStub{}, Clock: func() time.Time { return clockNow },
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)

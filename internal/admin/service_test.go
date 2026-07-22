@@ -14,10 +14,48 @@ import (
 	"github.com/bignormal/aera-admin/internal/audit"
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/secure"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/bignormal/aera-admin/internal/testkit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestAdministratorMutationsValidateReasonBeforeRepositoryAccess(t *testing.T) {
+	validator := &adminReasonValidatorSpy{err: settings.ErrReasonInactive}
+	service := &Service{reasons: validator}
+	actorID := uuid.New()
+	targetID := uuid.New()
+	reason := actionReason("req-reason-validation")
+
+	if err := service.ChangeRole(
+		context.Background(), actor(actorID, rbac.SuperAdmin, "req-reason-role"), targetID, rbac.Operator, reason,
+	); !errors.Is(err, settings.ErrReasonInactive) {
+		t.Fatalf("ChangeRole() error = %v", err)
+	}
+	if len(validator.usages) != 1 || validator.usages[0] != settings.UsageAdministrator {
+		t.Fatalf("ChangeRole reason usages = %v", validator.usages)
+	}
+
+	validator.usages = nil
+	if err := service.RevokeSessions(
+		context.Background(), actor(actorID, rbac.SuperAdmin, "req-reason-session"), targetID, reason,
+	); !errors.Is(err, settings.ErrReasonInactive) {
+		t.Fatalf("RevokeSessions() error = %v", err)
+	}
+	if len(validator.usages) != 1 || validator.usages[0] != settings.UsageSession {
+		t.Fatalf("RevokeSessions reason usages = %v", validator.usages)
+	}
+}
+
+type adminReasonValidatorSpy struct {
+	err    error
+	usages []settings.ReasonUsage
+}
+
+func (validator *adminReasonValidatorSpy) ValidateReason(_ context.Context, usage settings.ReasonUsage, _ string) error {
+	validator.usages = append(validator.usages, usage)
+	return validator.err
+}
 
 func TestActivationConsumesInvitationRequiresTOTPAndReturnsRecoveryCodesOnce(t *testing.T) {
 	fixture := newAdminFixture(t)
@@ -234,8 +272,10 @@ func TestRevokeSessionsAdvancesSecurityVersionAndIsIdempotent(t *testing.T) {
 	second := fixture.bootstrapAndActivate(t, "second@example.com", "第二管理员", "second correct horse battery")
 	fixture.insertSession(t, second.AdminID, rbac.SuperAdmin)
 	firstActor := actor(first.AdminID, rbac.SuperAdmin, "req-revoke-sessions")
+	reason := actionReason("req-revoke-sessions")
+	reason.Code = "session_cleanup"
 
-	if err := fixture.service.RevokeSessions(ctx, firstActor, second.AdminID, actionReason("req-revoke-sessions")); err != nil {
+	if err := fixture.service.RevokeSessions(ctx, firstActor, second.AdminID, reason); err != nil {
 		t.Fatalf("RevokeSessions() error = %v", err)
 	}
 	var securityVersion int64
@@ -250,7 +290,9 @@ func TestRevokeSessionsAdvancesSecurityVersionAndIsIdempotent(t *testing.T) {
 		t.Fatalf("revocation state = version:%d revoked:%v", securityVersion, revokedAt)
 	}
 
-	if err := fixture.service.RevokeSessions(ctx, firstActor, second.AdminID, actionReason("req-revoke-sessions-retry")); err != nil {
+	retryReason := actionReason("req-revoke-sessions-retry")
+	retryReason.Code = "session_cleanup"
+	if err := fixture.service.RevokeSessions(ctx, firstActor, second.AdminID, retryReason); err != nil {
 		t.Fatalf("RevokeSessions() retry error = %v", err)
 	}
 	var eventCount int
@@ -368,6 +410,10 @@ func newAdminFixture(t *testing.T) *adminFixture {
 	if err != nil {
 		t.Fatalf("audit.NewService() error = %v", err)
 	}
+	reasonStore, err := settings.NewStore(postgres)
+	if err != nil {
+		t.Fatalf("settings.NewStore() error = %v", err)
+	}
 	now := time.Date(2026, 7, 21, 15, 0, 0, 0, time.UTC)
 	totp := secure.DefaultTOTP()
 	service, err := NewService(ServiceConfig{
@@ -377,6 +423,7 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		TOTPSecrets: secrets,
 		TOTP:        totp,
 		Audit:       auditService,
+		Reasons:     reasonStore,
 		PublicURL:   "https://admin.example.test",
 		Clock:       func() time.Time { return now },
 	})

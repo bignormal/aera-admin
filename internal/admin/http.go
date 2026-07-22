@@ -15,6 +15,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/auth"
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/secure"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -366,7 +367,8 @@ func writeAdminDomainError(response http.ResponseWriter, err error) {
 		writeHTTPError(response, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "认证服务暂时不可用")
 	case errors.Is(err, ErrInvalidInvitation), errors.Is(err, ErrInvalidActivation):
 		writeHTTPError(response, http.StatusBadRequest, "ACTIVATION_INVALID", "激活信息无效或已过期")
-	case errors.Is(err, ErrInvalidRequest), errors.Is(err, audit.ErrInvalidRecord), errors.Is(err, audit.ErrSensitiveText):
+	case errors.Is(err, ErrInvalidRequest), errors.Is(err, settings.ErrInvalidRequest),
+		errors.Is(err, audit.ErrInvalidRecord), errors.Is(err, audit.ErrSensitiveText):
 		writeHTTPError(response, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效")
 	case errors.Is(err, ErrPermissionDenied):
 		writeHTTPError(response, http.StatusForbidden, "PERMISSION_DENIED", "没有执行此操作的权限")
@@ -384,6 +386,14 @@ func writeAdminDomainError(response http.ResponseWriter, err error) {
 		writeHTTPError(response, http.StatusConflict, "SELF_MANAGEMENT_FORBIDDEN", "不能对自己执行此操作")
 	case errors.Is(err, ErrStateConflict):
 		writeHTTPError(response, http.StatusConflict, "ADMINISTRATOR_STATE_CONFLICT", "管理员状态已变化，请刷新后重试")
+	case errors.Is(err, settings.ErrReasonNotFound):
+		writeHTTPError(response, http.StatusConflict, "REASON_CODE_NOT_FOUND", "标准原因不存在，请刷新后重试")
+	case errors.Is(err, settings.ErrReasonInactive):
+		writeHTTPError(response, http.StatusConflict, "REASON_CODE_INACTIVE", "标准原因已停用，请刷新后重试")
+	case errors.Is(err, settings.ErrReasonIncompatible):
+		writeHTTPError(response, http.StatusConflict, "REASON_CODE_CATEGORY_MISMATCH", "标准原因不适用于此操作")
+	case errors.Is(err, settings.ErrUnavailable):
+		writeHTTPError(response, http.StatusServiceUnavailable, "SETTINGS_UNAVAILABLE", "标准原因服务暂时不可用")
 	default:
 		writeHTTPError(response, http.StatusInternalServerError, "INTERNAL_ERROR", "服务暂时不可用")
 	}

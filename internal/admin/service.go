@@ -13,6 +13,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/audit"
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/secure"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,8 +31,13 @@ type ServiceConfig struct {
 	TOTPSecrets *secure.SecretCodec
 	TOTP        secure.TOTP
 	Audit       *audit.Service
+	Reasons     ReasonValidator
 	PublicURL   string
 	Clock       func() time.Time
+}
+
+type ReasonValidator interface {
+	ValidateReason(context.Context, settings.ReasonUsage, string) error
 }
 
 type Service struct {
@@ -41,13 +47,14 @@ type Service struct {
 	totpSecrets *secure.SecretCodec
 	totp        secure.TOTP
 	audit       *audit.Service
+	reasons     ReasonValidator
 	publicURL   *url.URL
 	clock       func() time.Time
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
 	if config.PostgreSQL == nil || config.Passwords == nil || config.Identities == nil ||
-		config.TOTPSecrets == nil || config.Audit == nil {
+		config.TOTPSecrets == nil || config.Audit == nil || config.Reasons == nil {
 		return nil, errors.New("administrator service dependencies are required")
 	}
 	publicURL, err := url.Parse(config.PublicURL)
@@ -67,14 +74,18 @@ func NewService(config ServiceConfig) (*Service, error) {
 		totpSecrets: config.TOTPSecrets,
 		totp:        config.TOTP,
 		audit:       config.Audit,
+		reasons:     config.Reasons,
 		publicURL:   publicURL,
 		clock:       clock,
 	}, nil
 }
 
 func (service *Service) BootstrapInvite(ctx context.Context, request InviteRequest) (InvitationResult, error) {
-	if request.Role != rbac.SuperAdmin {
+	if request.Role != rbac.SuperAdmin || !validDisplayName(request.DisplayName) || !validActionReason(request.Reason) {
 		return InvitationResult{}, ErrInvalidRequest
+	}
+	if err := service.validateReason(ctx, settings.UsageAdministrator, request.Reason.Code); err != nil {
+		return InvitationResult{}, err
 	}
 	resources, err := service.prepareInvitation(request, InvitationPurposeActivation)
 	if err != nil {
@@ -103,6 +114,12 @@ func (service *Service) BootstrapInvite(ctx context.Context, request InviteReque
 }
 
 func (service *Service) Invite(ctx context.Context, actor Actor, request InviteRequest) (InvitationResult, error) {
+	if !request.Role.Valid() || !validDisplayName(request.DisplayName) || !validActionReason(request.Reason) {
+		return InvitationResult{}, ErrInvalidRequest
+	}
+	if err := service.validateReason(ctx, settings.UsageAdministrator, request.Reason.Code); err != nil {
+		return InvitationResult{}, err
+	}
 	resources, err := service.prepareInvitation(request, InvitationPurposeActivation)
 	if err != nil {
 		return InvitationResult{}, err
@@ -483,6 +500,9 @@ func (service *Service) ChangeRole(ctx context.Context, actor Actor, targetID uu
 	if targetID == uuid.Nil || !role.Valid() || !validActionReason(reason) {
 		return ErrInvalidRequest
 	}
+	if err := service.validateReason(ctx, settings.UsageAdministrator, reason.Code); err != nil {
+		return err
+	}
 	return service.mutateAdministrator(ctx, actor, targetID, reason, func(tx pgx.Tx, target administratorRecord, now time.Time) (audit.Record, error) {
 		if target.Role == role {
 			return audit.Record{}, nil
@@ -520,6 +540,9 @@ func (service *Service) Suspend(ctx context.Context, actor Actor, targetID uuid.
 	if targetID == uuid.Nil || !validActionReason(reason) {
 		return ErrInvalidRequest
 	}
+	if err := service.validateReason(ctx, settings.UsageAdministrator, reason.Code); err != nil {
+		return err
+	}
 	return service.mutateAdministrator(ctx, actor, targetID, reason, func(tx pgx.Tx, target administratorRecord, now time.Time) (audit.Record, error) {
 		if target.Status == StatusSuspended {
 			return audit.Record{}, nil
@@ -556,6 +579,9 @@ func (service *Service) RevokeSessions(ctx context.Context, actor Actor, targetI
 	}
 	if targetID == uuid.Nil || !validActionReason(reason) {
 		return ErrInvalidRequest
+	}
+	if err := service.validateReason(ctx, settings.UsageSession, reason.Code); err != nil {
+		return err
 	}
 	return service.mutateAdministrator(ctx, actor, targetID, reason, func(tx pgx.Tx, target administratorRecord, now time.Time) (audit.Record, error) {
 		if target.Status != StatusActive {
@@ -645,6 +671,9 @@ func (service *Service) ResetTOTP(ctx context.Context, actor Actor, targetID uui
 	}
 	if targetID == uuid.Nil || !validActionReason(reason) {
 		return InvitationResult{}, ErrInvalidRequest
+	}
+	if err := service.validateReason(ctx, settings.UsageAdministrator, reason.Code); err != nil {
+		return InvitationResult{}, err
 	}
 	resources, err := service.prepareResetInvitation()
 	if err != nil {
@@ -889,6 +918,13 @@ func validDisplayName(value string) bool {
 
 func validActionReason(reason ActionReason) bool {
 	return reason.Code != "" && reason.Meta.RequestID != ""
+}
+
+func (service *Service) validateReason(ctx context.Context, usage settings.ReasonUsage, code string) error {
+	if service == nil || service.reasons == nil {
+		return settings.ErrUnavailable
+	}
+	return service.reasons.ValidateReason(ctx, usage, code)
 }
 
 func maskEmail(email string) string {

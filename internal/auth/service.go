@@ -35,7 +35,12 @@ type ServiceConfig struct {
 	Audit          *audit.Service
 	SessionHMACKey []byte
 	CSRFHMACKey    []byte
+	SessionPolicy  SessionPolicyReader
 	Clock          func() time.Time
+}
+
+type SessionPolicyReader interface {
+	SessionLifetimes(context.Context) (idle time.Duration, absolute time.Duration, err error)
 }
 
 type Service struct {
@@ -50,6 +55,7 @@ type Service struct {
 	tokens                   *tokenCodec
 	limiter                  *attemptLimiter
 	liveSessionWriter        func(context.Context, []byte, uuid.UUID, time.Duration) error
+	sessionPolicy            SessionPolicyReader
 	dummyPasswordHash        string
 	clock                    func() time.Time
 	beforePasswordValidation func()
@@ -58,7 +64,7 @@ type Service struct {
 
 func NewService(config ServiceConfig) (*Service, error) {
 	if config.PostgreSQL == nil || config.Redis == nil || config.Passwords == nil || config.Identities == nil ||
-		config.TOTPSecrets == nil || config.Audit == nil || !validRedisPrefix(config.RedisPrefix) {
+		config.TOTPSecrets == nil || config.Audit == nil || config.SessionPolicy == nil || !validRedisPrefix(config.RedisPrefix) {
 		return nil, errors.New("authentication service dependencies are required")
 	}
 	tokens, err := newTokenCodec(config.SessionHMACKey, config.CSRFHMACKey)
@@ -81,7 +87,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 	service := &Service{
 		repository: &repository{postgres: config.PostgreSQL}, redis: config.Redis, redisPrefix: config.RedisPrefix,
 		passwords: config.Passwords, identities: config.Identities, totpSecrets: config.TOTPSecrets,
-		totp: config.TOTP, audit: config.Audit, tokens: tokens,
+		totp: config.TOTP, audit: config.Audit, tokens: tokens, sessionPolicy: config.SessionPolicy,
 		limiter:           &attemptLimiter{client: config.Redis, prefix: config.RedisPrefix},
 		dummyPasswordHash: dummyPasswordHash, clock: clock,
 	}
@@ -251,11 +257,15 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 		}
 		totpAuthenticatedAt = cloneTime(now)
 	}
+	idleLifetime, absoluteLifetime, err := service.sessionLifetimes(ctx)
+	if err != nil {
+		return LoginResult{}, err
+	}
 	session := sessionRecord{
 		ID: material.ID, AdminID: administrator.ID, TokenHMAC: material.TokenHMAC, CSRFHMAC: material.CSRFHMAC,
 		SecurityVersion: administrator.SecurityVersion, Role: administrator.Role, MFAMethod: mfaMethod,
 		MFAAuthenticatedAt: now, TOTPAuthenticatedAt: totpAuthenticatedAt, CreatedAt: now, LastSeenAt: now,
-		IdleExpiresAt: now.Add(sessionIdleLifetime), AbsoluteExpiresAt: now.Add(sessionAbsoluteLifetime),
+		IdleExpiresAt: now.Add(idleLifetime), AbsoluteExpiresAt: now.Add(absoluteLifetime),
 	}
 	if err := insertSession(ctx, tx, session); err != nil {
 		return LoginResult{}, err
@@ -275,7 +285,7 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 	for _, digest := range revokedTokenHMACs {
 		deleteLiveSession(context.Background(), service.redis, service.redisPrefix, digest)
 	}
-	if err := service.liveSessionWriter(ctx, material.TokenHMAC, material.ID, sessionIdleLifetime); err != nil {
+	if err := service.liveSessionWriter(ctx, material.TokenHMAC, material.ID, idleLifetime); err != nil {
 		_ = revokeSession(context.Background(), service.repository.postgres, material.ID, now)
 		deleteChallenge(context.Background(), service.redis, service.redisPrefix, challengeDigest)
 		return LoginResult{}, ErrUnavailable
@@ -334,7 +344,11 @@ func (service *Service) Authenticate(ctx context.Context, rawSessionToken string
 		deleteLiveSession(context.Background(), service.redis, service.redisPrefix, tokenHMAC)
 		return AuthenticatedSession{}, ErrInvalidSession
 	}
-	idleExpiresAt := now.Add(sessionIdleLifetime)
+	idleLifetime, _, err := service.sessionLifetimes(ctx)
+	if err != nil {
+		return AuthenticatedSession{}, err
+	}
+	idleExpiresAt := now.Add(idleLifetime)
 	if !idleExpiresAt.Before(session.AbsoluteExpiresAt) {
 		idleExpiresAt = session.AbsoluteExpiresAt.Add(-time.Microsecond)
 	}
@@ -365,6 +379,38 @@ func (service *Service) Authenticate(ctx context.Context, rawSessionToken string
 		TOTPAuthenticatedAt: cloneOptionalTime(session.TOTPAuthenticatedAt), MFAMethod: session.MFAMethod,
 	}
 	return AuthenticatedSession{Principal: principal, CSRFToken: csrfToken, DisplayName: session.DisplayName, AbsoluteExpiresAt: session.AbsoluteExpiresAt}, nil
+}
+
+func (service *Service) InvalidateLiveSessions(ctx context.Context, tokenHMACs [][]byte) error {
+	if service == nil || service.redis == nil {
+		return ErrUnavailable
+	}
+	if len(tokenHMACs) == 0 {
+		return nil
+	}
+	keys := make([]string, len(tokenHMACs))
+	for index, tokenHMAC := range tokenHMACs {
+		if len(tokenHMAC) != sha256.Size {
+			return ErrUnavailable
+		}
+		keys[index] = liveSessionKey(service.redisPrefix, tokenHMAC)
+	}
+	if err := service.redis.Del(ctx, keys...).Err(); err != nil {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+func (service *Service) sessionLifetimes(ctx context.Context) (time.Duration, time.Duration, error) {
+	if service == nil || service.sessionPolicy == nil {
+		return 0, 0, ErrUnavailable
+	}
+	idle, absolute, err := service.sessionPolicy.SessionLifetimes(ctx)
+	if err != nil || idle < 5*time.Minute || idle > 120*time.Minute ||
+		absolute < time.Hour || absolute > 24*time.Hour || absolute <= idle {
+		return 0, 0, ErrUnavailable
+	}
+	return idle, absolute, nil
 }
 
 func (service *Service) StepUp(ctx context.Context, rawSessionToken, totpCode string, meta RequestMeta) (AuthenticatedSession, error) {

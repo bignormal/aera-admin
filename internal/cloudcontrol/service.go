@@ -13,6 +13,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
 	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	adminsettings "github.com/bignormal/aera-admin/internal/settings"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -23,7 +24,11 @@ var (
 	ErrPermissionDenied = errors.New("Cloud control permission is denied")
 )
 
-var exactPhonePattern = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+var (
+	exactPhonePattern          = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+	cloudReasonCodePattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
+	cloudIdempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$`)
+)
 
 type ServiceConfig struct {
 	PostgreSQL *pgxpool.Pool
@@ -32,7 +37,12 @@ type ServiceConfig struct {
 	Operations *operations.Service
 	Approvals  *approval.Service
 	Audit      *audit.Service
+	Reasons    ReasonValidator
 	Clock      func() time.Time
+}
+
+type ReasonValidator interface {
+	ValidateReason(context.Context, adminsettings.ReasonUsage, string) error
 }
 
 type Service struct {
@@ -42,6 +52,7 @@ type Service struct {
 	operations *operations.Service
 	approvals  *approval.Service
 	audit      *audit.Service
+	reasons    ReasonValidator
 	clock      func() time.Time
 }
 
@@ -54,12 +65,14 @@ type HealthDocument struct {
 
 func NewService(settings ServiceConfig) (*Service, error) {
 	if settings.PostgreSQL == nil || settings.Redis == nil || settings.Cloud == nil ||
-		settings.Operations == nil || settings.Approvals == nil || settings.Audit == nil || settings.Clock == nil {
+		settings.Operations == nil || settings.Approvals == nil || settings.Audit == nil ||
+		settings.Reasons == nil || settings.Clock == nil {
 		return nil, errors.New("Cloud control service dependencies are required")
 	}
 	return &Service{
 		postgres: settings.PostgreSQL, redis: settings.Redis, cloud: settings.Cloud,
-		operations: settings.Operations, approvals: settings.Approvals, audit: settings.Audit, clock: settings.Clock,
+		operations: settings.Operations, approvals: settings.Approvals, audit: settings.Audit,
+		reasons: settings.Reasons, clock: settings.Clock,
 	}, nil
 }
 
@@ -196,6 +209,18 @@ func (service *Service) RevokeDevice(
 	reason admin.ActionReason,
 	idempotencyKey string,
 ) (operations.Result, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.RevokeCloudDevice) {
+		return operations.Result{}, ErrPermissionDenied
+	}
+	if !validCloudMutation(deviceID, expectedRevision, reason, idempotencyKey) {
+		return operations.Result{}, ErrInvalidRequest
+	}
+	if service == nil || service.reasons == nil {
+		return operations.Result{}, adminsettings.ErrUnavailable
+	}
+	if err := service.reasons.ValidateReason(ctx, adminsettings.UsageDevice, reason.Code); err != nil {
+		return operations.Result{}, err
+	}
 	return service.operations.EnqueueImmediate(ctx, operations.EnqueueRequest{
 		Actor: actor, Action: operations.RevokeDevice, TargetID: deviceID,
 		ExpectedRevision: expectedRevision, Reason: reason, BrowserIdempotencyKey: idempotencyKey,
@@ -210,6 +235,18 @@ func (service *Service) RevokeSession(
 	reason admin.ActionReason,
 	idempotencyKey string,
 ) (operations.Result, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.RevokeCloudSession) {
+		return operations.Result{}, ErrPermissionDenied
+	}
+	if !validCloudMutation(sessionID, expectedRevision, reason, idempotencyKey) {
+		return operations.Result{}, ErrInvalidRequest
+	}
+	if service == nil || service.reasons == nil {
+		return operations.Result{}, adminsettings.ErrUnavailable
+	}
+	if err := service.reasons.ValidateReason(ctx, adminsettings.UsageSession, reason.Code); err != nil {
+		return operations.Result{}, err
+	}
 	return service.operations.EnqueueImmediate(ctx, operations.EnqueueRequest{
 		Actor: actor, Action: operations.RevokeSession, TargetID: sessionID,
 		ExpectedRevision: expectedRevision, Reason: reason, BrowserIdempotencyKey: idempotencyKey,
@@ -290,6 +327,13 @@ func validLookup(input cloudadmin.LookupRequest) bool {
 
 func validPage(page cloudadmin.PageRequest) bool {
 	return page.Limit >= 1 && page.Limit <= 100 && len(page.Cursor) <= 512
+}
+
+func validCloudMutation(targetID uuid.UUID, expectedRevision int64, reason admin.ActionReason, idempotencyKey string) bool {
+	return targetID != uuid.Nil && expectedRevision > 0 && cloudReasonCodePattern.MatchString(reason.Code) &&
+		cloudIdempotencyKeyPattern.MatchString(idempotencyKey) && reason.Meta.RequestID != "" &&
+		len(reason.Meta.RequestID) <= 128 && (len(reason.Meta.SourceIPHMAC) == 0 || len(reason.Meta.SourceIPHMAC) == 32) &&
+		!audit.ContainsSensitiveText(reason.TicketReference) && !audit.ContainsSensitiveText(reason.Note)
 }
 
 func stableLookupError(err error) string {

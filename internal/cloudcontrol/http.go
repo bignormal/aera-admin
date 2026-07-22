@@ -18,6 +18,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/cloudadmin"
 	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -67,12 +68,17 @@ var errorResponses = []errorResponse{
 	{ErrInvalidRequest, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效"},
 	{operations.ErrInvalidRequest, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效"},
 	{approval.ErrInvalidRequest, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效"},
+	{settings.ErrInvalidRequest, http.StatusBadRequest, "INVALID_REQUEST", "请求内容无效"},
 	{operations.ErrIdempotencyKeyReused, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED", "幂等键已用于其他操作"},
 	{approval.ErrSelfReview, http.StatusForbidden, "APPROVAL_SELF_REVIEW_FORBIDDEN", "发起人不能审批自己的申请"},
 	{approval.ErrExpired, http.StatusConflict, "APPROVAL_EXPIRED", "审批申请已过期"},
 	{approval.ErrStateConflict, http.StatusConflict, "APPROVAL_STATE_CONFLICT", "申请状态已变化，请刷新后重试"},
 	{operations.ErrStateConflict, http.StatusConflict, "OPERATION_STATE_CONFLICT", "操作状态已变化，请刷新后重试"},
 	{approval.ErrTargetState, http.StatusConflict, "TARGET_STATE_CONFLICT", "目标状态不允许执行此操作"},
+	{settings.ErrReasonNotFound, http.StatusConflict, "REASON_CODE_NOT_FOUND", "标准原因不存在，请刷新后重试"},
+	{settings.ErrReasonInactive, http.StatusConflict, "REASON_CODE_INACTIVE", "标准原因已停用，请刷新后重试"},
+	{settings.ErrReasonIncompatible, http.StatusConflict, "REASON_CODE_CATEGORY_MISMATCH", "标准原因不适用于此操作"},
+	{settings.ErrUnavailable, http.StatusServiceUnavailable, "SETTINGS_UNAVAILABLE", "标准原因服务暂时不可用"},
 	{operations.ErrCloudUnavailable, http.StatusServiceUnavailable, "CLOUD_UNAVAILABLE", "Cloud 管理服务暂时不可用"},
 	{cloudadmin.ErrNotConfigured, http.StatusServiceUnavailable, "CLOUD_NOT_CONFIGURED", "Cloud 管理服务尚未配置"},
 	{cloudadmin.ErrUnavailable, http.StatusServiceUnavailable, "CLOUD_UNAVAILABLE", "Cloud 管理服务暂时不可用"},

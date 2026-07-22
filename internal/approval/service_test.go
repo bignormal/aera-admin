@@ -8,10 +8,45 @@ import (
 	"github.com/bignormal/aera-admin/internal/admin"
 	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/bignormal/aera-admin/internal/settings"
 	"github.com/bignormal/aera-admin/internal/testkit"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestCreateValidatesAccountReasonBeforeCloudOrDatabaseMutation(t *testing.T) {
+	postgres := testkit.Postgres(t)
+	fixture := newApprovalFixture(t, postgres)
+	validator := &approvalReasonValidatorSpy{err: settings.ErrReasonIncompatible}
+	fixture.service.reasons = validator
+
+	_, err := fixture.service.Create(context.Background(), CreateRequest{
+		Actor: fixture.operator, Action: DisableUser, TargetUserID: fixture.user.ID,
+		Reason: admin.ActionReason{Code: "session_cleanup", Meta: fixture.operator.Meta},
+	})
+	if !errors.Is(err, settings.ErrReasonIncompatible) {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if validator.calls != 1 || validator.usage != settings.UsageAccount {
+		t.Fatalf("reason validation calls/usage = %d/%s", validator.calls, validator.usage)
+	}
+	var count int
+	if err := postgres.QueryRow(context.Background(), `SELECT count(*) FROM approval_requests`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("approval count/error = %d/%v", count, err)
+	}
+}
+
+type approvalReasonValidatorSpy struct {
+	err   error
+	usage settings.ReasonUsage
+	calls int
+}
+
+func (validator *approvalReasonValidatorSpy) ValidateReason(_ context.Context, usage settings.ReasonUsage, _ string) error {
+	validator.calls++
+	validator.usage = usage
+	return validator.err
+}
 
 func TestCreateRequiresOperatorAndAllowedTargetState(t *testing.T) {
 	postgres := testkit.Postgres(t)
