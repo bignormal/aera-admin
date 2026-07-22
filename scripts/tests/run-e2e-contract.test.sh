@@ -16,6 +16,12 @@ grep -q 'docker compose -p' "$runner"
 grep -q 'docker compose.* port postgres 5432' "$runner"
 grep -q 'docker compose.* port redis 6379' "$runner"
 grep -q 'keyUsage=critical,keyCertSign,cRLSign' "$runner"
+grep -q '真实 aera-cloud' "$root/README.md"
+
+if grep -Eq '真实 Internal Admin API 尚未.*实现' "$root/README.md"; then
+  echo 'README still claims that the real Cloud Internal Admin API is unimplemented' >&2
+  exit 1
+fi
 
 if grep -q 'cloud-stub' "$runner" "$root/Makefile"; then
   echo 'real Cloud E2E still references the Stub' >&2

@@ -4,7 +4,7 @@ Aera Admin 是 Aera 公司内部控制台，只允许获批的开发、运营、
 
 当前仓库已完成独立管理员认证安全底座，以及 Admin 侧 Cloud 用户、设备、会话、双人审批、幂等和 Outbox 工作流。Cloud 管理未配置或不可达时严格失败关闭，页面不会生成演示指标或显示虚假成功。
 
-本仓库的 mTLS 与服务令牌契约已通过独立 E2E 测试进程验证；`aera-cloud` 真实 Internal Admin API 尚未在本次范围内实现，因此不能把当前状态描述为真实 Cloud 端到端管理、部署或发布。
+真实 `aera-cloud` 已实现独立的 Internal Admin API 监听、mTLS 与短期 Ed25519 服务令牌双重鉴权。当前跨仓库 E2E 会启动真实 Cloud、真实 Admin 和各自隔离的 PostgreSQL/Redis，验证精确身份查询的脱敏结果、Session 撤销、双人审批后的账号禁用、Outbox 重试、Cloud 最终状态与两侧审计；这仍是本地验收结果，不代表已经部署或发布。
 
 ## 本地开发
 
@@ -67,11 +67,13 @@ make build
 
 ```bash
 make verify  # 格式、vet、Go/竞态/集成、前端、OpenAPI、E2E 类型与 release 构建
-make e2e     # 独立 mTLS Cloud 进程、真实认证/RBAC/审批/Outbox、双日志与审计泄漏检查
+AERA_ADMIN_E2E_CLOUD_REPO=/Users/zizimutou/Desktop/aera/aera-cloud/.worktrees/internal-admin-api make e2e
 make image   # aera-admin:security-foundation
 ```
 
-`make e2e` 临时生成 CA、服务端/客户端证书和 Ed25519 服务密钥，启动独立 Cloud 契约进程，并验证 TLS 1.3 双向认证和 audience/scope 受限的短期服务令牌。它只删除固定的 `aera_admin_e2e` 数据库和 `aera-admin:test:*` Redis 键，并在结束时清除包含一次性凭证与测试 PKI 的临时文件。固定资源由进程锁保护，同一台机器不能并发运行两组 E2E；它不会改动开发数据库。
+`AERA_ADMIN_E2E_CLOUD_REPO` 必须指向包含配套 Internal Admin API 的真实 aera-cloud 工作区；运行器会先验证 Go module 和两仓 OpenAPI 文件逐字节一致。`make e2e` 临时生成 CA、服务端/客户端证书、Ed25519 服务密钥与两个隔离的 Compose project，通过动态 loopback 端口启动真实 Cloud 和 Admin。应用端口由进程锁保护，同一台机器不能并发运行两组 E2E；结束时会停止进程、销毁两组测试卷，并清除一次性凭证、测试 PKI 和 fixture，不会删除或复用日常开发数据库。
+
+跨仓库 E2E 通过只证明当前两个工作区在本机完成验证。Git 提交、分支推送、合并、私有环境部署和生产发布仍是彼此独立的交付状态。
 
 ## 容器
 
