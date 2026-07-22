@@ -31,10 +31,10 @@ test:
 	go test ./... -count=1
 
 test-integration: dependencies-up
-	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test ./internal/store ./internal/audit ./internal/admin ./internal/auth ./internal/settings ./internal/cloudadmin ./internal/operations ./internal/approval ./internal/cloudcontrol -count=1
+	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test ./internal/store ./internal/audit ./internal/admin ./internal/auth ./internal/settings ./internal/cloudadmin ./internal/operations ./internal/approval ./internal/cloudcontrol ./internal/officialagent -count=1
 
 race: dependencies-up
-	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test -race ./internal/audit ./internal/admin ./internal/auth ./internal/settings ./internal/cloudadmin ./internal/operations ./internal/approval ./internal/cloudcontrol -count=1
+	AERA_ADMIN_TEST_DATABASE_URL='$(AERA_ADMIN_TEST_DATABASE_URL)' AERA_ADMIN_TEST_REDIS_ADDR='$(AERA_ADMIN_TEST_REDIS_ADDR)' go test -race ./internal/audit ./internal/admin ./internal/auth ./internal/settings ./internal/cloudadmin ./internal/operations ./internal/approval ./internal/cloudcontrol ./internal/officialagent -count=1
 
 web-check: install
 	pnpm --filter @aera/admin-web lint

@@ -85,6 +85,8 @@ make image   # aera-admin:security-foundation
 
 `AERA_ADMIN_E2E_CLOUD_REPO` 必须指向包含配套 Internal Admin API 的真实 aera-cloud 工作区；运行器会先验证 Go module 和两仓 OpenAPI 文件逐字节一致。`make e2e` 临时生成 CA、服务端/客户端证书、Ed25519 服务密钥与两个隔离的 Compose project，通过动态 loopback 端口启动真实 Cloud 和 Admin。应用端口由进程锁保护，同一台机器不能并发运行两组 E2E；结束时会停止进程、销毁两组测试卷，并清除一次性凭证、测试 PKI 和 fixture，不会删除或复用日常开发数据库。
 
+官方 Agent E2E 使用真实 Cloud Internal Admin API 验证 Developer 建稿与提交、独立 Super Admin 审核、Operator 灰度与暂停/恢复、双人回滚审批、Auditor 审计以及 Support/Finance 拒绝。它同时关闭真实 Cloud 并断言 Admin 返回不可用，确保审批成功与 Cloud 执行成功保持为两个状态，且不存在模拟成功降级路径。
+
 跨仓库 E2E 通过只证明当前两个工作区在本机完成验证。Git 提交、分支推送、合并、私有环境部署和生产发布仍是彼此独立的交付状态。
 
 ## 容器

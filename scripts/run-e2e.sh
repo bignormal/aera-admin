@@ -5,15 +5,19 @@ umask 077
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 cloud_repo=${AERA_ADMIN_E2E_CLOUD_REPO:-}
 if [ -z "$cloud_repo" ]; then
-  common_dir=$(git -C "$repository_root" rev-parse --git-common-dir)
-  case "$common_dir" in
-    /*) ;;
-    *) common_dir="$repository_root/$common_dir" ;;
-  esac
-  canonical_admin=$(CDPATH= cd -- "$(dirname -- "$common_dir")" && pwd -P)
-  cloud_repo=$(CDPATH= cd -- "$canonical_admin/../aera-cloud" && pwd -P)
-else
-  cloud_repo=$(CDPATH= cd -- "$cloud_repo" && pwd -P)
+  echo "Cloud repository must be provided explicitly with AERA_ADMIN_E2E_CLOUD_REPO" >&2
+  exit 1
+fi
+cloud_repo=$(CDPATH= cd -- "$cloud_repo" && pwd -P)
+cloud_top=$(git -C "$cloud_repo" rev-parse --show-toplevel)
+cloud_top=$(CDPATH= cd -- "$cloud_top" && pwd -P)
+if [ "$cloud_top" != "$cloud_repo" ]; then
+  echo "Aera Admin E2E Cloud path must be the checkout root" >&2
+  exit 1
+fi
+if [ -n "$(git -C "$cloud_repo" status --porcelain)" ]; then
+  echo "Aera Admin E2E Cloud checkout must be clean" >&2
+  exit 1
 fi
 
 if [ "$(sed -n 's/^module //p' "$cloud_repo/go.mod")" != 'github.com/bignormal/aera-cloud' ]; then
@@ -57,6 +61,7 @@ fixture_file="$e2e_tmp_dir/fixtures.json"
 cloud_fixture_file="$e2e_tmp_dir/cloud-fixture.json"
 server_log="$e2e_tmp_dir/server.log"
 cloud_log="$e2e_tmp_dir/cloud.log"
+cloud_pid_file="$e2e_tmp_dir/cloud.pid"
 pki_dir="$e2e_tmp_dir/pki"
 artifact_dir="$e2e_tmp_dir/test-results"
 server_pid=""
@@ -92,7 +97,19 @@ cleanup() {
   cleanup_status=$?
   trap - EXIT INT TERM
   stop_owned_process "$server_pid"
+  if [ -f "$cloud_pid_file" ]; then
+    cloud_pid=$(sed -n '1p' "$cloud_pid_file")
+  fi
   stop_owned_process "$cloud_pid"
+  if [ "$cleanup_status" -ne 0 ]; then
+    echo "Aera Admin E2E failed; final service status follows" >&2
+    if [ -f "$server_log" ]; then
+      tail -n 40 "$server_log" >&2
+    fi
+    if [ -f "$cloud_log" ]; then
+      tail -n 40 "$cloud_log" >&2
+    fi
+  fi
   if [ "$admin_compose_started" = true ]; then
     safe_compose_down "$repository_root" "$admin_project" 'aera_admin_e2e_' >/dev/null 2>&1 || true
   fi
@@ -174,6 +191,7 @@ admin_operation_hmac_key=$(openssl rand -base64 32 | tr -d '\n')
 cloud_identity_encryption_key=$(openssl rand -base64 32 | tr -d '\n')
 cloud_identity_lookup_key=$(openssl rand -base64 32 | tr -d '\n')
 cloud_internal_hmac_key=$(openssl rand -base64 32 | tr -d '\n')
+cloud_official_rollout_hmac_key=$(openssl rand -base64 32 | tr -d '\n')
 
 export AERA_ADMIN_ENVIRONMENT=test
 export AERA_ADMIN_LISTEN_ADDR=127.0.0.1:18080
@@ -195,7 +213,7 @@ export AERA_ADMIN_CLOUD_CLIENT_KEY_FILE="$pki_dir/client-key.pem"
 export AERA_ADMIN_CLOUD_JWT_SIGNING_KEY_FILE="$pki_dir/service-key.pem"
 export AERA_ADMIN_CLOUD_JWT_ISSUER=aera-admin
 export AERA_ADMIN_CLOUD_JWT_SUBJECT=aera-admin-e2e
-export AERA_ADMIN_CLOUD_SCOPES='["users:read","devices:write","sessions:write","accounts:write","operations:read"]'
+export AERA_ADMIN_CLOUD_SCOPES='["users:read","devices:write","sessions:write","accounts:write","operations:read","official_agents:read","official_agent_drafts:write","official_agent_reviews:write","official_agent_releases:write","official_agent_audit:read"]'
 
 set -a
 . "$cloud_repo/.env.example"
@@ -219,6 +237,12 @@ export AGENTERA_CLOUD_INTERNAL_ADMIN_JWT_ISSUER=aera-admin
 export AGENTERA_CLOUD_INTERNAL_ADMIN_JWT_SUBJECT=aera-admin-e2e
 export AGENTERA_CLOUD_INTERNAL_ADMIN_HMAC_ACTIVE_KEY_ID=cloud-admin-e2e-v1
 export AGENTERA_CLOUD_INTERNAL_ADMIN_HMAC_KEYS="{\"cloud-admin-e2e-v1\":\"$cloud_internal_hmac_key\"}"
+export AGENTERA_CLOUD_OFFICIAL_AGENTS_ENABLED=true
+export AGENTERA_CLOUD_PLATFORM_ID=019f0000-0000-7000-8000-000000000999
+export AGENTERA_CLOUD_PLATFORM_KEY="agentera_e2e_$run_token"
+export AGENTERA_CLOUD_PLATFORM_DISPLAY_NAME='AgentEra E2E Official'
+export AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_ACTIVE_KEY_ID=rollout-e2e-v1
+export AGENTERA_CLOUD_OFFICIAL_ROLLOUT_HMAC_KEYS="{\"rollout-e2e-v1\":\"$cloud_official_rollout_hmac_key\"}"
 
 export AERA_ADMIN_E2E_ARTIFACT_DIR="$artifact_dir"
 export AERA_ADMIN_E2E_BASE_URL=http://localhost:18080
@@ -230,10 +254,13 @@ export AERA_ADMIN_E2E_SERVER_LOG="$server_log"
 export AERA_ADMIN_E2E_CLOUD_LOG="$cloud_log"
 export AERA_ADMIN_E2E_CLOUD_FIXTURE_FILE="$cloud_fixture_file"
 export AERA_ADMIN_E2E_CLOUD_VERIFY_BINARY="$cloud_e2e_binary"
+export AERA_ADMIN_E2E_CLOUD_BINARY="$cloud_binary"
+export AERA_ADMIN_E2E_CLOUD_PID_FILE="$cloud_pid_file"
 
 "$cloud_e2e_binary" seed --output "$cloud_fixture_file"
 "$cloud_binary" >"$cloud_log" 2>&1 &
 cloud_pid=$!
+printf '%s\n' "$cloud_pid" >"$cloud_pid_file"
 
 cloud_ready=false
 attempt=0

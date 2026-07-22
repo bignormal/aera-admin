@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { closeSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { expect, type Page } from '@playwright/test';
 
@@ -31,6 +32,7 @@ export interface SensitiveCanary {
 
 export interface CloudFixture {
   user_id: string;
+  official_audience_user_id: string;
   device_id: string;
   session_id: string;
   masked_email: string;
@@ -46,6 +48,7 @@ export interface E2EFixtures {
     rawLookupIdentity: string;
     sessionID: string;
     deviceID: string;
+    officialAudienceUserID: string;
     userID: string;
   };
   roles: Record<Role, AdministratorFixture[]>;
@@ -92,6 +95,62 @@ export function appendSensitiveCanaries(canaries: SensitiveCanary[]): void {
     known.add(`${canary.kind}\0${canary.value}`);
   }
   writeFixtures(fixtures);
+}
+
+function requiredEnvironment(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+function cloudPID(): number {
+  const raw = readFileSync(requiredEnvironment('AERA_ADMIN_E2E_CLOUD_PID_FILE'), 'utf8').trim();
+  if (!/^[1-9][0-9]{0,9}$/u.test(raw)) throw new Error('Cloud E2E PID file is invalid');
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 1) throw new Error('Cloud E2E PID is unsafe');
+  return value;
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+export async function stopRealCloud(): Promise<void> {
+  const pid = cloudPID();
+  process.kill(pid, 'SIGTERM');
+  const deadline = Date.now() + 10_000;
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) throw new Error('real Cloud process did not stop');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+export async function restartRealCloud(): Promise<void> {
+  const binary = requiredEnvironment('AERA_ADMIN_E2E_CLOUD_BINARY');
+  const log = requiredEnvironment('AERA_ADMIN_E2E_CLOUD_LOG');
+  const pidFile = requiredEnvironment('AERA_ADMIN_E2E_CLOUD_PID_FILE');
+  const output = openSync(log, 'a', 0o600);
+  try {
+    const child = spawn(binary, [], {
+      detached: true,
+      env: process.env,
+      stdio: ['ignore', output, output],
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('spawn', resolve);
+    });
+    if (!child.pid || child.pid <= 1) throw new Error('real Cloud process did not return a safe PID');
+    writeFileSync(pidFile, `${child.pid}\n`, { encoding: 'utf8', mode: 0o600 });
+    child.unref();
+  } finally {
+    closeSync(output);
+  }
 }
 
 function decodeBase32(value: string): Buffer {

@@ -84,6 +84,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     { displayName: '安全设置超级管理员', purpose: 'SETTINGS' },
     { displayName: '会话策略超级管理员', purpose: 'SESSION-POLICY' },
     { displayName: '策略恢复超级管理员', purpose: 'POLICY-RESTORE' },
+    { displayName: '官方 Agent 审核超级管理员', purpose: 'OFFICIAL-REVIEWER' },
   ];
   for (const [offset, dedicated] of dedicatedSuperAdministrators.entries()) {
     const ordinal = offset + 3;
@@ -136,6 +137,36 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     );
   }
 
+  const officialOperatorEmail = 'e2e.operator2.canary@example.test';
+  const officialOperatorPassword = passwordFor('operator', 2);
+  const officialOperatorInvitation = await apiRequest<{ activation_url: string }>(
+    baseURL,
+    '/admin-users/invitations',
+    {
+      body: {
+        display_name: '官方 Agent 发布运营员',
+        email: officialOperatorEmail,
+        note: '',
+        reason_code: 'staff_change',
+        role: 'operator',
+        ticket_reference: 'E2E-OFFICIAL-OPERATOR',
+      },
+      cookie: bootstrapActor.cookie,
+      csrfToken: bootstrapActor.csrfToken,
+    },
+  );
+  expectStatus(officialOperatorInvitation, 201, 'invite official Agent operator');
+  roleFixtures.operator.push(
+    await activateInvitation(
+      baseURL,
+      officialOperatorInvitation.body.activation_url,
+      officialOperatorEmail,
+      officialOperatorPassword,
+      'operator',
+      sensitiveCanaries,
+    ),
+  );
+
   const candidateEmail = 'e2e.browser-activation.canary@example.test';
   const candidatePassword = passwordFor('browser-activation', 1);
   const candidateInvitation = await apiRequest<{ activation_url: string }>(baseURL, '/admin-users/invitations', {
@@ -174,6 +205,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
       rawLookupIdentity: cloudFixture.raw_lookup_identity,
       sessionID: cloudFixture.session_id,
       deviceID: cloudFixture.device_id,
+      officialAudienceUserID: cloudFixture.official_audience_user_id,
       userID: cloudFixture.user_id,
     },
     roles: roleFixtures,
