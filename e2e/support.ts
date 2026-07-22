@@ -27,6 +27,15 @@ export interface SensitiveCanary {
   value: string;
 }
 
+export interface CloudFixture {
+  user_id: string;
+  device_id: string;
+  session_id: string;
+  masked_email: string;
+  raw_lookup_identity: string;
+  initial_revision: number;
+}
+
 export interface E2EFixtures {
   baseURL: string;
   browserCandidate: BrowserCandidateFixture;
@@ -62,6 +71,10 @@ function fixturePath(): string {
 
 export function readFixtures(): E2EFixtures {
   return JSON.parse(readFileSync(fixturePath(), 'utf8')) as E2EFixtures;
+}
+
+export function readCloudFixture(path: string): CloudFixture {
+  return JSON.parse(readFileSync(path, 'utf8')) as CloudFixture;
 }
 
 export function writeFixtures(fixtures: E2EFixtures): void {

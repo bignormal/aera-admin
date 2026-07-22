@@ -10,6 +10,7 @@ import {
   loginWithRecovery,
   maskedEmail,
   prepareActivation,
+  readCloudFixture,
   type AdministratorFixture,
   type E2EFixtures,
   type Role,
@@ -42,9 +43,9 @@ function passwordFor(role: string, ordinal: number): string {
 export default async function globalSetup(_config: FullConfig): Promise<void> {
   const baseURL = requiredEnvironment('AERA_ADMIN_E2E_BASE_URL');
   const bootstrapBinary = requiredEnvironment('AERA_ADMIN_E2E_BOOTSTRAP_BINARY');
+  const cloudFixture = readCloudFixture(requiredEnvironment('AERA_ADMIN_E2E_CLOUD_FIXTURE_FILE'));
   const sensitiveCanaries: SensitiveCanary[] = [];
-  const rawCloudLookupIdentity = 'cloud.lookup.canary@example.test';
-  sensitiveCanaries.push({ kind: 'cloud_raw_lookup_identity', value: rawCloudLookupIdentity });
+  sensitiveCanaries.push({ kind: 'cloud_raw_lookup_identity', value: cloudFixture.raw_lookup_identity });
   const roleFixtures: Record<Role, AdministratorFixture[]> = {
     super_admin: [],
     developer: [],
@@ -164,11 +165,11 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
       totpSecret: candidate.secret,
     },
     cloud: {
-      maskedEmail: 'c***@example.test',
-      rawLookupIdentity: rawCloudLookupIdentity,
-      sessionID: '019f0000-0000-7000-8000-000000000073',
-      deviceID: '019f0000-0000-7000-8000-000000000072',
-      userID: '019f0000-0000-7000-8000-000000000071',
+      maskedEmail: cloudFixture.masked_email,
+      rawLookupIdentity: cloudFixture.raw_lookup_identity,
+      sessionID: cloudFixture.session_id,
+      deviceID: cloudFixture.device_id,
+      userID: cloudFixture.user_id,
     },
     roles: roleFixtures,
     sensitiveCanaries,

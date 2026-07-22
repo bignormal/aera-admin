@@ -6,7 +6,7 @@ AERA_ADMIN_TEST_DATABASE_URL ?= postgres://aera_admin:aera-admin-dev-only@127.0.
 AERA_ADMIN_TEST_REDIS_ADDR ?= 127.0.0.1:56382
 AERA_ADMIN_IMAGE ?= aera-admin:security-foundation
 
-.PHONY: check build dependencies-up dependencies-down e2e e2e-typecheck format-check image install openapi-check race test test-integration verify vet web-check web-test
+.PHONY: check build dependencies-up dependencies-down e2e e2e-runner-contract e2e-typecheck format-check image install openapi-check race test test-integration verify vet web-check web-test
 
 dependencies-up:
 	docker compose up -d --wait postgres redis
@@ -18,8 +18,11 @@ install:
 	pnpm install --frozen-lockfile
 
 format-check:
-	@unformatted="$$(gofmt -l $$(find api cmd internal e2e/cloud-stub -name '*.go' -type f))"; \
+	@unformatted="$$(gofmt -l $$(find api cmd internal -name '*.go' -type f))"; \
 	if [ -n "$$unformatted" ]; then echo "Go files require gofmt:" >&2; echo "$$unformatted" >&2; exit 1; fi
+
+e2e-runner-contract:
+	sh scripts/tests/run-e2e-contract.test.sh
 
 vet:
 	go vet ./...
@@ -53,7 +56,7 @@ build: install
 	CGO_ENABLED=0 go build -tags release -trimpath -o bin/aera-admin ./cmd/aera-admin
 	CGO_ENABLED=0 go build -trimpath -o bin/aera-admin-bootstrap ./cmd/aera-admin-bootstrap
 
-check: dependencies-up install format-check vet test test-integration race web-check openapi-check e2e-typecheck build
+check: dependencies-up install e2e-runner-contract format-check vet test test-integration race web-check openapi-check e2e-typecheck build
 
 verify: check
 
