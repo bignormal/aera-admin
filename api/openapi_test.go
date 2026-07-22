@@ -2,6 +2,8 @@ package api_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,14 +259,33 @@ func TestCloudConsumerContract(t *testing.T) {
 		t.Fatalf("Cloud OpenAPI version = %v, want 3.1.0", document["openapi"])
 	}
 	paths := object(t, document["paths"], "Cloud paths")
-	if len(paths) != 11 {
-		t.Fatalf("Cloud path count = %d, want 11", len(paths))
+	if len(paths) != 31 {
+		t.Fatalf("Cloud path count = %d, want 31", len(paths))
 	}
 	raw := string(encoded)
+	operationCount := 0
+	for _, pathValue := range paths {
+		for method := range object(t, pathValue, "Cloud path") {
+			if method == "get" || method == "post" || method == "put" || method == "patch" || method == "delete" {
+				operationCount++
+			}
+		}
+	}
+	if operationCount != 34 {
+		t.Fatalf("Cloud operation count = %d, want 34", operationCount)
+	}
 	for _, operationID := range []string{
 		"getCloudAdminHealth", "listCloudUsers", "lookupCloudUser", "getCloudUser",
 		"listCloudUserDevices", "listCloudUserSessions", "revokeCloudDevice",
 		"revokeCloudSession", "disableCloudUser", "enableCloudUser", "getCloudAdminOperation",
+		"listOfficialAgentDefinitions", "reserveOfficialAgentDefinition", "getOfficialAgentDefinition",
+		"listOfficialAgentDrafts", "createOfficialAgentDraft", "getOfficialAgentDraft",
+		"updateOfficialAgentDraft", "validateOfficialAgentDraft", "submitOfficialAgentDraft",
+		"listOfficialAgentSubmissions", "getOfficialAgentSubmission", "withdrawOfficialAgentSubmission",
+		"reviewOfficialAgentSubmission", "listOfficialAgentVersions", "getOfficialAgentVersion",
+		"listOfficialAgentReleases", "getOfficialAgentRelease", "activateOfficialAgentRelease",
+		"updateOfficialAgentRollout", "pauseOfficialAgentRelease", "resumeOfficialAgentRelease",
+		"rollbackOfficialAgentRelease", "listOfficialAgentAuditEvents",
 	} {
 		if !strings.Contains(raw, "operationId: "+operationID) {
 			t.Errorf("missing %s", operationID)
@@ -286,6 +307,17 @@ func TestCloudConsumerContract(t *testing.T) {
 		}
 	}
 	walkReferences(t, document, document, "#")
+}
+
+func TestCloudConsumerContractHasReviewedProviderDigest(t *testing.T) {
+	encoded, err := os.ReadFile("openapi/cloud-admin-client.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(encoded)
+	if got, want := hex.EncodeToString(digest[:]), "f3915014562c00c2f5f4957a14bdd35435e918c06556f66ebf8c70aec051436f"; got != want {
+		t.Fatalf("Cloud consumer contract digest = %s, want %s", got, want)
+	}
 }
 
 func assertSessionAndCSRF(t *testing.T, operation map[string]any, path string) {

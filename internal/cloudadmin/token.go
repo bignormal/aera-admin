@@ -12,6 +12,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/google/uuid"
 )
 
 const serviceTokenLifetime = 5 * time.Minute
@@ -19,7 +22,15 @@ const serviceTokenLifetime = 5 * time.Minute
 var serviceIdentityPattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{2,63}$`)
 
 type tokenSource interface {
-	Token(context.Context) (string, error)
+	Token(context.Context, *ActorContext) (string, error)
+}
+
+type ActorContext struct {
+	AdminID          uuid.UUID
+	Role             rbac.Role
+	OperationID      *uuid.UUID
+	ApprovalID       *uuid.UUID
+	RequesterAdminID *uuid.UUID
 }
 
 type ed25519TokenSource struct {
@@ -31,14 +42,19 @@ type ed25519TokenSource struct {
 }
 
 type serviceClaims struct {
-	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"`
-	Audience  string   `json:"aud"`
-	Scopes    []string `json:"scope"`
-	IssuedAt  int64    `json:"iat"`
-	NotBefore int64    `json:"nbf"`
-	ExpiresAt int64    `json:"exp"`
-	JWTID     string   `json:"jti"`
+	Issuer           string   `json:"iss"`
+	Subject          string   `json:"sub"`
+	Audience         string   `json:"aud"`
+	Scopes           []string `json:"scope"`
+	IssuedAt         int64    `json:"iat"`
+	NotBefore        int64    `json:"nbf"`
+	ExpiresAt        int64    `json:"exp"`
+	JWTID            string   `json:"jti"`
+	AdminID          string   `json:"admin_id,omitempty"`
+	AdminRole        string   `json:"admin_role,omitempty"`
+	OperationID      string   `json:"operation_id,omitempty"`
+	ApprovalID       string   `json:"approval_id,omitempty"`
+	RequesterAdminID string   `json:"requester_admin_id,omitempty"`
 }
 
 func parseEd25519PrivateKey(raw []byte) (ed25519.PrivateKey, error) {
@@ -71,9 +87,12 @@ func newTokenSource(privateKey ed25519.PrivateKey, issuer, subject string, scope
 	}, nil
 }
 
-func (source *ed25519TokenSource) Token(ctx context.Context) (string, error) {
+func (source *ed25519TokenSource) Token(ctx context.Context, actor *ActorContext) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	if !validActorContext(actor) {
+		return "", errors.New("service JWT actor context is invalid")
 	}
 	identifier := make([]byte, 16)
 	if _, err := rand.Read(identifier); err != nil {
@@ -86,6 +105,17 @@ func (source *ed25519TokenSource) Token(ctx context.Context) (string, error) {
 		NotBefore: now.Add(-5 * time.Second).Unix(), ExpiresAt: now.Add(serviceTokenLifetime).Unix(),
 		JWTID: base64.RawURLEncoding.EncodeToString(identifier),
 	}
+	if actor != nil {
+		claims.AdminID = actor.AdminID.String()
+		claims.AdminRole = string(actor.Role)
+		if actor.OperationID != nil {
+			claims.OperationID = actor.OperationID.String()
+		}
+		if actor.ApprovalID != nil {
+			claims.ApprovalID = actor.ApprovalID.String()
+			claims.RequesterAdminID = actor.RequesterAdminID.String()
+		}
+	}
 	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "JWT"})
 	body, err := json.Marshal(claims)
 	if err != nil {
@@ -94,4 +124,22 @@ func (source *ed25519TokenSource) Token(ctx context.Context) (string, error) {
 	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 	signature := ed25519.Sign(source.privateKey, []byte(unsigned))
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func validActorContext(actor *ActorContext) bool {
+	if actor == nil {
+		return true
+	}
+	if actor.AdminID == uuid.Nil || !actor.Role.Valid() ||
+		(actor.OperationID != nil && *actor.OperationID == uuid.Nil) ||
+		(actor.ApprovalID != nil && *actor.ApprovalID == uuid.Nil) ||
+		(actor.RequesterAdminID != nil && *actor.RequesterAdminID == uuid.Nil) {
+		return false
+	}
+	rollbackEvidence := actor.ApprovalID != nil || actor.RequesterAdminID != nil
+	if rollbackEvidence {
+		return actor.OperationID != nil && actor.ApprovalID != nil && actor.RequesterAdminID != nil &&
+			*actor.RequesterAdminID != actor.AdminID
+	}
+	return true
 }

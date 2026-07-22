@@ -7,6 +7,7 @@ import (
 )
 
 type Client interface {
+	OfficialAgentClient
 	Health(context.Context) (Health, error)
 	ListUsers(context.Context, ListUsersRequest) (Page[User], error)
 	LookupUser(context.Context, LookupRequest) (User, error)
@@ -77,5 +78,57 @@ func (DisabledClient) EnableUser(context.Context, uuid.UUID, CommandMeta) (Opera
 }
 
 func (DisabledClient) GetOperation(context.Context, uuid.UUID) (Operation, error) {
+	return Operation{}, ErrNotConfigured
+}
+
+func (DisabledClient) ListOfficialDefinitions(context.Context, ActorContext, PageRequest) (Page[OfficialDefinition], error) {
+	return Page[OfficialDefinition]{}, ErrNotConfigured
+}
+
+func (DisabledClient) GetOfficialDefinition(context.Context, ActorContext, uuid.UUID) (OfficialDefinitionDetail, error) {
+	return OfficialDefinitionDetail{}, ErrNotConfigured
+}
+
+func (DisabledClient) ListOfficialDrafts(context.Context, ActorContext, PageRequest) (Page[OfficialDraft], error) {
+	return Page[OfficialDraft]{}, ErrNotConfigured
+}
+
+func (DisabledClient) GetOfficialDraft(context.Context, ActorContext, uuid.UUID) (OfficialDraft, error) {
+	return OfficialDraft{}, ErrNotConfigured
+}
+
+func (DisabledClient) ValidateOfficialDraft(context.Context, ActorContext, uuid.UUID) (OfficialDraftValidation, error) {
+	return OfficialDraftValidation{}, ErrNotConfigured
+}
+
+func (DisabledClient) ListOfficialSubmissions(context.Context, ActorContext, OfficialSubmissionFilter) (Page[OfficialSubmission], error) {
+	return Page[OfficialSubmission]{}, ErrNotConfigured
+}
+
+func (DisabledClient) GetOfficialSubmission(context.Context, ActorContext, uuid.UUID) (OfficialSubmission, error) {
+	return OfficialSubmission{}, ErrNotConfigured
+}
+
+func (DisabledClient) ListOfficialVersions(context.Context, ActorContext, PageRequest) (Page[OfficialVersion], error) {
+	return Page[OfficialVersion]{}, ErrNotConfigured
+}
+
+func (DisabledClient) GetOfficialVersion(context.Context, ActorContext, uuid.UUID) (OfficialVersion, error) {
+	return OfficialVersion{}, ErrNotConfigured
+}
+
+func (DisabledClient) ListOfficialReleases(context.Context, ActorContext, PageRequest) (Page[OfficialRelease], error) {
+	return Page[OfficialRelease]{}, ErrNotConfigured
+}
+
+func (DisabledClient) GetOfficialRelease(context.Context, ActorContext, uuid.UUID) (OfficialReleaseDetail, error) {
+	return OfficialReleaseDetail{}, ErrNotConfigured
+}
+
+func (DisabledClient) ListOfficialAudit(context.Context, ActorContext, PageRequest) (Page[OfficialAuditEvent], error) {
+	return Page[OfficialAuditEvent]{}, ErrNotConfigured
+}
+
+func (DisabledClient) ExecuteOfficialCommand(context.Context, ActorContext, OfficialCommand) (Operation, error) {
 	return Operation{}, ErrNotConfigured
 }

@@ -16,6 +16,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bignormal/aera-admin/internal/rbac"
+	"github.com/google/uuid"
 )
 
 func TestServiceTokenIsAudienceBoundShortLivedAndUnique(t *testing.T) {
@@ -28,11 +31,11 @@ func TestServiceTokenIsAudienceBoundShortLivedAndUnique(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := source.Token(context.Background())
+	first, err := source.Token(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := source.Token(context.Background())
+	second, err := source.Token(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +48,54 @@ func TestServiceTokenIsAudienceBoundShortLivedAndUnique(t *testing.T) {
 		claims.Subject != "aera-admin-test" || claims.ExpiresAt-claims.IssuedAt != 300 ||
 		!slices.Equal(claims.Scopes, []string{"users:read"}) || claims.JWTID == "" {
 		t.Fatalf("claims = %+v", claims)
+	}
+}
+
+func TestServiceTokenBindsOnlyValidatedOfficialActorIdentity(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	source, err := newTokenSource(privateKey, "aera-admin", "aera-admin-test", []string{"official_agent_releases:write"}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID, approvalID, requesterID := uuid.New(), uuid.New(), uuid.New()
+	actor := &ActorContext{
+		AdminID: uuid.New(), Role: rbac.SuperAdmin, OperationID: &operationID,
+		ApprovalID: &approvalID, RequesterAdminID: &requesterID,
+	}
+	token, err := source.Token(context.Background(), actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := verifyTestToken(t, publicKey, token)
+	if claims.AdminID != actor.AdminID.String() || claims.AdminRole != string(rbac.SuperAdmin) ||
+		claims.OperationID != operationID.String() || claims.ApprovalID != approvalID.String() ||
+		claims.RequesterAdminID != requesterID.String() || claims.ExpiresAt-claims.IssuedAt != 300 {
+		t.Fatalf("actor claims = %+v", claims)
+	}
+	encoded, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"reason", "note", "manifest", "bundle", "allowlist", "secret"} {
+		if strings.Contains(strings.ToLower(string(encoded)), forbidden) {
+			t.Fatalf("JWT claims contain forbidden field %q: %s", forbidden, encoded)
+		}
+	}
+
+	invalid := []ActorContext{
+		{Role: rbac.Developer},
+		{AdminID: uuid.New(), Role: rbac.Role("owner")},
+		{AdminID: uuid.New(), Role: rbac.Operator, ApprovalID: &approvalID},
+		{AdminID: uuid.New(), Role: rbac.SuperAdmin, OperationID: &operationID, ApprovalID: &approvalID},
+	}
+	for _, candidate := range invalid {
+		if _, err := source.Token(context.Background(), &candidate); err == nil {
+			t.Fatalf("invalid actor accepted: %+v", candidate)
+		}
 	}
 }
 

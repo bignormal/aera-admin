@@ -12,11 +12,13 @@ import (
 )
 
 var (
-	ErrNotConfigured     = errors.New("Cloud administration is not configured")
-	ErrUnavailable       = errors.New("Cloud administration is unavailable")
-	ErrContractViolation = errors.New("Cloud administration contract violation")
-	ErrNotFound          = errors.New("Cloud administration target not found")
-	ErrConflict          = errors.New("Cloud administration state conflict")
+	ErrNotConfigured         = errors.New("Cloud administration is not configured")
+	ErrUnavailable           = errors.New("Cloud administration is unavailable")
+	ErrContractViolation     = errors.New("Cloud administration contract violation")
+	ErrPermissionDenied      = errors.New("Cloud administration permission denied")
+	ErrPublicationDLPBlocked = errors.New("Cloud administration publication blocked by DLP")
+	ErrNotFound              = errors.New("Cloud administration target not found")
+	ErrConflict              = errors.New("Cloud administration state conflict")
 
 	maskedEmailPattern = regexp.MustCompile(`^[^@*[:space:]]\*{3}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 	maskedPhonePattern = regexp.MustCompile(`^[0-9]{3}\*{4}[0-9]{4}$`)

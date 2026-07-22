@@ -220,8 +220,23 @@ func validCloudEnvironment() map[string]string {
 	values["AERA_ADMIN_CLOUD_JWT_SIGNING_KEY_FILE"] = "/run/secrets/admin-service-ed25519.pem"
 	values["AERA_ADMIN_CLOUD_JWT_ISSUER"] = "aera-admin"
 	values["AERA_ADMIN_CLOUD_JWT_SUBJECT"] = "aera-admin-production"
-	values["AERA_ADMIN_CLOUD_SCOPES"] = `["users:read","devices:write","sessions:write","accounts:write","operations:read"]`
+	values["AERA_ADMIN_CLOUD_SCOPES"] = `["users:read","devices:write","sessions:write","accounts:write","operations:read","official_agents:read","official_agent_drafts:write","official_agent_reviews:write","official_agent_releases:write","official_agent_audit:read"]`
 	return values
+}
+
+func TestLoadAcceptsOnlyExplicitOfficialCloudScopes(t *testing.T) {
+	loaded, err := Load(mapLookup(validCloudEnvironment()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"accounts:write", "devices:write", "official_agent_audit:read", "official_agent_drafts:write",
+		"official_agent_releases:write", "official_agent_reviews:write", "official_agents:read",
+		"operations:read", "sessions:write", "users:read",
+	}
+	if strings.Join(loaded.CloudAdmin.Scopes, ",") != strings.Join(want, ",") {
+		t.Fatalf("Cloud scopes = %v, want %v", loaded.CloudAdmin.Scopes, want)
+	}
 }
 
 func keyRingJSON(id, key string) string {

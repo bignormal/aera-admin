@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/config"
+	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/google/uuid"
 )
 
@@ -110,11 +112,117 @@ func TestHTTPClientRejectsOversizeAndTimeout(t *testing.T) {
 	}
 }
 
+func TestHTTPClientSignsOfficialActorAndValidatesOperationIdentity(t *testing.T) {
+	fixture := newTLSFixture(t)
+	actorID, operationID := uuid.New(), uuid.New()
+	requestCount := 0
+	server := fixture.startServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestCount++
+		claims := verifyTestToken(t, fixture.servicePublicKey, strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "))
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/internal/admin/v1/official-agent-definitions":
+			if request.Method == http.MethodGet {
+				if claims.AdminID != actorID.String() || claims.AdminRole != string(rbac.Developer) || claims.OperationID != "" {
+					t.Errorf("read claims = %+v", claims)
+				}
+				_, _ = io.WriteString(response, `{"items":[{"definition_id":"019f0000-0000-7000-8000-000000000221","platform_id":"019f0000-0000-7000-8000-000000000222","display_name":"Official Research","status":"active","created_by_admin_id":"019f0000-0000-7000-8000-000000000223","created_at":"2026-07-22T08:00:00Z","updated_at":"2026-07-22T08:00:00Z"}]}`)
+				return
+			}
+			if claims.OperationID != operationID.String() || request.Header.Get("Idempotency-Key") != operationID.String() {
+				t.Errorf("mutation claims/header = %+v / %q", claims, request.Header.Get("Idempotency-Key"))
+			}
+			var body map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["actor_admin_id"] != actorID.String() || body["actor_admin_role"] != string(rbac.Developer) {
+				t.Errorf("mutation body/error = %+v / %v", body, err)
+			}
+			_, _ = io.WriteString(response, `{"operation_id":"`+operationID.String()+`","status":"succeeded","administrative_revision":1,"updated_at":"2026-07-22T08:00:00Z"}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	fixture.config.BaseURL = server.URL
+	client, err := NewHTTPClient(fixture.config, fixture.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := ActorContext{AdminID: actorID, Role: rbac.Developer}
+	definitions, err := client.ListOfficialDefinitions(context.Background(), actor, PageRequest{Limit: 20})
+	if err != nil || len(definitions.Items) != 1 {
+		t.Fatalf("definitions = %+v, %v", definitions, err)
+	}
+	actor.OperationID = &operationID
+	operation, err := client.ExecuteOfficialCommand(context.Background(), actor, OfficialCommand{
+		Action: OfficialDefinitionReserve, TargetID: uuid.New(), ExpectedRevision: 1,
+		ReasonCode: "official_content_review", Payload: json.RawMessage(`{"display_name":"Official Research"}`),
+	})
+	if err != nil || operation.ID != operationID || requestCount != 2 {
+		t.Fatalf("official operation = %+v, requests=%d, error=%v", operation, requestCount, err)
+	}
+}
+
+func TestHTTPClientRejectsUnsafeOfficialResponseEncodingAndPageSize(t *testing.T) {
+	const validDefinition = `{"definition_id":"019f0000-0000-7000-8000-000000000221","platform_id":"019f0000-0000-7000-8000-000000000222","display_name":"Official Research","status":"active","created_by_admin_id":"019f0000-0000-7000-8000-000000000223","created_at":"2026-07-22T08:00:00Z","updated_at":"2026-07-22T08:00:00Z"}`
+	cases := []struct {
+		name  string
+		body  string
+		limit int
+	}{
+		{"duplicate key", `{"items":[{"definition_id":"019f0000-0000-7000-8000-000000000221","platform_id":"019f0000-0000-7000-8000-000000000222","display_name":"Official Research","status":"active","status":"archived","created_by_admin_id":"019f0000-0000-7000-8000-000000000223","created_at":"2026-07-22T08:00:00Z","updated_at":"2026-07-22T08:00:00Z"}]}`, 1},
+		{"noncanonical UUID", strings.Replace(`{"items":[`+validDefinition+`]}`, "019f0000-0000-7000-8000-000000000221", "019F0000-0000-7000-8000-000000000221", 1), 1},
+		{"too many items", `{"items":[` + validDefinition + `,` + strings.Replace(validDefinition, "000000000221", "000000000224", 1) + `]}`, 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newTLSFixture(t)
+			server := fixture.startServer(t, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				response.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(response, test.body)
+			}))
+			fixture.config.BaseURL = server.URL
+			client, err := NewHTTPClient(fixture.config, fixture.clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.ListOfficialDefinitions(context.Background(), ActorContext{
+				AdminID: uuid.New(), Role: rbac.Developer,
+			}, PageRequest{Limit: test.limit})
+			if !errors.Is(err, ErrContractViolation) {
+				t.Fatalf("ListOfficialDefinitions() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestHTTPClientRejectsMismatchedOfficialOperationIdentity(t *testing.T) {
+	fixture := newTLSFixture(t)
+	server := fixture.startServer(t, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(response, `{"operation_id":"019f0000-0000-7000-8000-000000000399","status":"succeeded","administrative_revision":1,"updated_at":"2026-07-22T08:00:00Z"}`)
+	}))
+	fixture.config.BaseURL = server.URL
+	client, err := NewHTTPClient(fixture.config, fixture.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID := uuid.MustParse("019f0000-0000-7000-8000-000000000398")
+	_, err = client.ExecuteOfficialCommand(context.Background(), ActorContext{
+		AdminID: uuid.New(), Role: rbac.Developer, OperationID: &operationID,
+	}, OfficialCommand{
+		Action: OfficialDefinitionReserve, TargetID: uuid.New(), ExpectedRevision: 1,
+		ReasonCode: "official_content_review", Payload: json.RawMessage(`{"display_name":"Official Research"}`),
+	})
+	if !errors.Is(err, ErrContractViolation) {
+		t.Fatalf("ExecuteOfficialCommand() error = %v", err)
+	}
+}
+
 type tlsFixture struct {
 	config            config.CloudAdminConfig
 	clock             func() time.Time
 	serverCertificate tls.Certificate
 	clientRoots       *x509.CertPool
+	servicePublicKey  ed25519.PublicKey
 }
 
 func newTLSFixture(t *testing.T) *tlsFixture {
@@ -194,11 +302,15 @@ func newTLSFixture(t *testing.T) *tlsFixture {
 			Enabled: true, BaseURL: "https://127.0.0.1", CAFile: write("ca.pem", caPEM),
 			ClientCertFile: write("client.pem", clientCertificatePEM), ClientKeyFile: write("client-key.pem", clientKeyPEM),
 			JWTSigningKeyFile: write("service-key.pem", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedServiceKey})),
-			JWTIssuer:         "aera-admin", JWTSubject: "aera-admin-test", Scopes: []string{"users:read", "sessions:write"},
+			JWTIssuer:         "aera-admin", JWTSubject: "aera-admin-test", Scopes: []string{
+				"users:read", "sessions:write", "official_agents:read", "official_agent_drafts:write",
+				"official_agent_reviews:write", "official_agent_releases:write", "official_agent_audit:read",
+			},
 		},
 		clock:             func() time.Time { return fixedNow },
 		serverCertificate: serverCertificate,
 		clientRoots:       roots,
+		servicePublicKey:  serviceKey.Public().(ed25519.PublicKey),
 	}
 }
 

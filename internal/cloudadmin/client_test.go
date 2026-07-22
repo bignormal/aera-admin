@@ -19,6 +19,9 @@ func TestDisabledClientFailsEveryCloudCapabilityClosed(t *testing.T) {
 	if _, err := client.RevokeSession(context.Background(), uuid.New(), CommandMeta{}); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("RevokeSession() error = %v", err)
 	}
+	if _, err := client.ListOfficialDefinitions(context.Background(), ActorContext{}, PageRequest{Limit: 20}); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("ListOfficialDefinitions() error = %v", err)
+	}
 }
 
 var _ Client = DisabledClient{}

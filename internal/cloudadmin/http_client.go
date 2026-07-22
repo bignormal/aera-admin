@@ -131,6 +131,19 @@ func (client *httpClient) doJSON(
 	operationID *uuid.UUID,
 	target any,
 ) error {
+	return client.doJSONAs(ctx, nil, method, path, query, body, operationID, target)
+}
+
+func (client *httpClient) doJSONAs(
+	ctx context.Context,
+	actor *ActorContext,
+	method string,
+	path string,
+	query url.Values,
+	body any,
+	operationID *uuid.UUID,
+	target any,
+) error {
 	endpoint := *client.baseURL
 	endpoint.Path = path
 	endpoint.RawQuery = query.Encode()
@@ -151,7 +164,7 @@ func (client *httpClient) doJSON(
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	token, err := client.tokens.Token(ctx)
+	token, err := client.tokens.Token(ctx, actor)
 	if err != nil {
 		return staged(failureServiceJWT, ErrUnavailable)
 	}
@@ -177,6 +190,9 @@ func (client *httpClient) doJSON(
 		return staged(failureUpstream, ErrUnavailable)
 	}
 	if len(raw) > maxCloudResponseBytes {
+		return staged(failureContract, ErrContractViolation)
+	}
+	if actor != nil && validateOfficialJSONEncoding(raw) != nil {
 		return staged(failureContract, ErrContractViolation)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -389,10 +405,16 @@ func validCommandMeta(meta CommandMeta) bool {
 
 func mapRemoteStatus(status int) error {
 	switch status {
+	case http.StatusBadRequest:
+		return ErrContractViolation
+	case http.StatusForbidden:
+		return ErrPermissionDenied
 	case http.StatusNotFound:
 		return ErrNotFound
 	case http.StatusConflict:
 		return ErrConflict
+	case http.StatusUnprocessableEntity:
+		return ErrPublicationDLPBlocked
 	default:
 		return ErrUnavailable
 	}

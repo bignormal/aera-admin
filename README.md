@@ -34,7 +34,7 @@ make check
 - `AERA_ADMIN_OPERATION_HMAC_KEY`
 - `AERA_ADMIN_CLOUD_ENABLED`
 
-本地只验证安全底座、尚未连接 Cloud 时，将 `AERA_ADMIN_CLOUD_ENABLED` 设为 `false`；用户、设备、会话与审批查询会明确返回未配置状态，不会回退到模拟数据。
+本地只验证安全底座、尚未连接 Cloud 时，将 `AERA_ADMIN_CLOUD_ENABLED` 设为 `false`；用户、设备、会话、审批和官方 Agent 查询会明确返回未配置状态，不会回退到模拟数据。
 
 启用 Cloud 管理链路时，以下配置全部必填：
 
@@ -48,6 +48,8 @@ make check
 - `AERA_ADMIN_CLOUD_SCOPES`
 
 CA、客户端证书、客户端私钥和 Ed25519 签名私钥必须使用仓库外的规范绝对路径，并由批准的 Secret Manager 挂载；Cloud Origin 必须使用 HTTPS，权限范围必须逐项列出，禁止通配符。
+
+官方 Agent 链路还要求显式列出 `official_agents:read`、`official_agent_drafts:write`、`official_agent_reviews:write`、`official_agent_releases:write` 和 `official_agent_audit:read`。Admin 只按配置申请这些 scope；`aera-cloud` 的 `AGENTERA_CLOUD_OFFICIAL_AGENTS_ENABLED` 仍是最终功能开关。Cloud 未启用、不可达或返回未知状态时，Admin 必须显示不可用/待确认，不能生成模拟成功。官方请求的短期服务令牌只绑定管理员 ID、固定角色及必要的 operation/approval 标识，不携带原因、备注、Manifest、Bundle、灰度名单或任何密钥材料。
 
 ```bash
 make build
