@@ -104,7 +104,7 @@ func TestEveryCloudRouteHasFixedSixRoleMatrix(t *testing.T) {
 		{http.MethodPost, "/approval-requests/019f0000-0000-7000-8000-000000000046/approve", `{}`, 202, allowed(rbac.SuperAdmin)},
 		{http.MethodPost, "/approval-requests/019f0000-0000-7000-8000-000000000046/reject", `{}`, 200, allowed(rbac.SuperAdmin)},
 		{http.MethodPost, "/approval-requests/019f0000-0000-7000-8000-000000000046/cancel", `{}`, 200, allowed(rbac.Operator)},
-		{http.MethodGet, "/operations/019f0000-0000-7000-8000-000000000047", "", 200, allowed(rbac.SuperAdmin, rbac.Operator, rbac.Support)},
+		{http.MethodGet, "/operations/019f0000-0000-7000-8000-000000000047", "", 200, allowed(rbac.SuperAdmin, rbac.Developer, rbac.Operator, rbac.Support, rbac.Auditor)},
 		{http.MethodGet, "/system/health", "", 200, allowed(rbac.SuperAdmin, rbac.Developer, rbac.Operator, rbac.Auditor)},
 	}
 	handler := NewHandler(&handlerStub{})

@@ -22,6 +22,7 @@ tags:
   - name: Operations
   - name: Audit
   - name: Settings
+  - name: OfficialAgents
   - name: System
 
 paths:
@@ -833,6 +834,436 @@ paths:
         '409': { $ref: '#/components/responses/SettingsConflict' }
         '503': { $ref: '#/components/responses/SettingsUnavailable' }
 
+  /official-agents:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出平台官方 Agent 定义
+      operationId: listOfficialAgents
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialDefinitionPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+    post:
+      tags: [OfficialAgents]
+      summary: 排队创建官方 Agent 定义保留
+      description: Developer 权限；成功仅表示本地 Outbox 已排队，不代表 Cloud 已完成。
+      operationId: reserveOfficialAgent
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '422': { $ref: '#/components/responses/OfficialDLPBlocked' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agents/{definitionID}:
+    get:
+      tags: [OfficialAgents]
+      summary: 获取官方 Agent 定义
+      operationId: getOfficialAgent
+      security: [{ adminSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/DefinitionID' }]
+      responses:
+        '200': { $ref: '#/components/responses/OfficialDefinition' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-drafts:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出官方 Agent 草稿
+      operationId: listOfficialAgentDrafts
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialDraftPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+    post:
+      tags: [OfficialAgents]
+      summary: 排队创建官方 Agent 草稿
+      operationId: createOfficialAgentDraft
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '422': { $ref: '#/components/responses/OfficialDLPBlocked' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-drafts/{draftID}:
+    get:
+      tags: [OfficialAgents]
+      summary: 获取官方 Agent 草稿
+      operationId: getOfficialAgentDraft
+      security: [{ adminSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/DraftID' }]
+      responses:
+        '200': { $ref: '#/components/responses/OfficialDraft' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+    patch:
+      tags: [OfficialAgents]
+      summary: 排队更新官方 Agent 草稿
+      operationId: updateOfficialAgentDraft
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/DraftID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '422': { $ref: '#/components/responses/OfficialDLPBlocked' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-drafts/{draftID}/validate:
+    post:
+      tags: [OfficialAgents]
+      summary: 运行官方 Agent 草稿安全校验
+      operationId: validateOfficialAgentDraft
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/DraftID' }]
+      responses:
+        '200': { $ref: '#/components/responses/OfficialDraftValidation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-drafts/{draftID}/submit:
+    post:
+      tags: [OfficialAgents]
+      summary: 排队提交冻结的官方 Agent 草稿
+      operationId: submitOfficialAgentDraft
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/DraftID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '422': { $ref: '#/components/responses/OfficialDLPBlocked' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-submissions:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出冻结的官方 Agent 提交
+      operationId: listOfficialAgentSubmissions
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/OfficialSubmissionStatus'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialSubmissionPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-submissions/{submissionID}:
+    get:
+      tags: [OfficialAgents]
+      summary: 获取冻结的官方 Agent 提交
+      operationId: getOfficialAgentSubmission
+      security: [{ adminSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/SubmissionID' }]
+      responses:
+        '200': { $ref: '#/components/responses/OfficialSubmission' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-submissions/{submissionID}/withdraw:
+    post:
+      tags: [OfficialAgents]
+      summary: 排队撤回自己的官方 Agent 提交
+      operationId: withdrawOfficialAgentSubmission
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/SubmissionID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-submissions/{submissionID}/review:
+    post:
+      tags: [OfficialAgents]
+      summary: 审核并原子发布官方 Agent 不可变版本
+      description: 仅不同的 Super Admin；要求 10 分钟内 TOTP Step-up。批准时 initial_channels 必须为 internal 或 stable 的非空去重子集。
+      operationId: reviewOfficialAgentSubmission
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/SubmissionID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '422': { $ref: '#/components/responses/OfficialDLPBlocked' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-versions:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出官方 Agent 不可变版本
+      operationId: listOfficialAgentVersions
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialVersionPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-releases:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出官方 Agent 发布头
+      operationId: listOfficialAgentReleases
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialReleasePage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-releases/{releaseID}:
+    get:
+      tags: [OfficialAgents]
+      summary: 获取官方 Agent 当前发布头
+      operationId: getOfficialAgentRelease
+      security: [{ adminSession: [] }]
+      parameters: [{ $ref: '#/components/parameters/ReleaseID' }]
+      responses:
+        '200': { $ref: '#/components/responses/OfficialRelease' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-releases/{releaseID}/activate:
+    post:
+      tags: [OfficialAgents]
+      summary: 排队激活一个已批准官方 Agent 版本
+      operationId: activateOfficialAgentRelease
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReleaseID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses: &officialMutationResponses
+        '202': { $ref: '#/components/responses/OfficialOperation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '422': { $ref: '#/components/responses/OfficialDLPBlocked' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-releases/{releaseID}/rollout:
+    post:
+      tags: [OfficialAgents]
+      summary: 排队更新官方 Agent 灰度范围
+      operationId: updateOfficialAgentRollout
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReleaseID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses: *officialMutationResponses
+
+  /official-agent-releases/{releaseID}/pause:
+    post:
+      tags: [OfficialAgents]
+      summary: 排队暂停官方 Agent 发布
+      operationId: pauseOfficialAgentRelease
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReleaseID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses: *officialMutationResponses
+
+  /official-agent-releases/{releaseID}/resume:
+    post:
+      tags: [OfficialAgents]
+      summary: 排队恢复官方 Agent 发布
+      operationId: resumeOfficialAgentRelease
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReleaseID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialMutation' }
+      responses: *officialMutationResponses
+
+  /official-agent-releases/{releaseID}/rollback-requests:
+    post:
+      tags: [OfficialAgents]
+      summary: Operator 创建官方 Agent 回滚审批
+      operationId: requestOfficialAgentRollback
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ReleaseID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/OfficialRollback' }
+      responses:
+        '201': { $ref: '#/components/responses/OfficialRollbackApproval' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-rollback-requests:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出授权范围内的官方 Agent 回滚审批
+      operationId: listOfficialAgentRollbackRequests
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/RollbackView'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialRollbackPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /official-agent-rollback-requests/{approvalID}/approve:
+    post:
+      tags: [OfficialAgents]
+      summary: 不同 Super Admin 批准并排队官方 Agent 回滚
+      operationId: approveOfficialAgentRollback
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/EmptyJSON' }
+      responses:
+        '202': { $ref: '#/components/responses/OfficialRollbackApproval' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
+  /official-agent-rollback-requests/{approvalID}/reject:
+    post:
+      tags: [OfficialAgents]
+      summary: Super Admin 拒绝官方 Agent 回滚
+      operationId: rejectOfficialAgentRollback
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/EmptyJSON' }
+      responses:
+        '200': { $ref: '#/components/responses/OfficialRollbackApproval' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+
+  /official-agent-rollback-requests/{approvalID}/cancel:
+    post:
+      tags: [OfficialAgents]
+      summary: Operator 取消自己尚未审批的官方 Agent 回滚
+      operationId: cancelOfficialAgentRollback
+      security: [{ adminSession: [], csrfToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ApprovalID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/EmptyJSON' }
+      responses:
+        '200': { $ref: '#/components/responses/OfficialRollbackApproval' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/OfficialConflict' }
+
+  /official-agent-audit-events:
+    get:
+      tags: [OfficialAgents]
+      summary: 列出不包含密钥、身份查找值或运行数据的官方 Agent 审计
+      operationId: listOfficialAgentAuditEvents
+      security: [{ adminSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/OfficialAuditPage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/OfficialContractViolation' }
+        '503': { $ref: '#/components/responses/OfficialCloudUnavailable' }
+
   /system/health:
     get:
       tags: [System]
@@ -905,6 +1336,34 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    DefinitionID:
+      name: definitionID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DraftID:
+      name: draftID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SubmissionID:
+      name: submissionID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReleaseID:
+      name: releaseID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OfficialSubmissionStatus:
+      name: status
+      in: query
+      schema: { type: string, enum: [pending, approved, rejected, withdrawn, superseded] }
+    RollbackView:
+      name: view
+      in: query
+      schema: { type: string, enum: [pending_for_me, mine, all] }
     ApprovalView:
       name: view
       in: query
@@ -933,11 +1392,605 @@ components:
           schema:
             type: object
             additionalProperties: false
+    OfficialMutation:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialMutationRequest' }
+    OfficialRollback:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialRollbackRequest' }
 
   schemas:
     AdminRole:
       type: string
       enum: [super_admin, developer, operator, support, finance, auditor]
+
+    SHA256Digest:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+
+    OfficialMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, reason_code, payload]
+      properties:
+        expected_revision: { type: integer, minimum: 1 }
+        expected_target_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$' }
+        note: { type: string, maxLength: 500 }
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/OfficialDefinitionReservePayload'
+            - $ref: '#/components/schemas/OfficialDraftCreatePayload'
+            - $ref: '#/components/schemas/OfficialDraftUpdatePayload'
+            - $ref: '#/components/schemas/OfficialReviewPayload'
+            - $ref: '#/components/schemas/OfficialActivatePayload'
+            - $ref: '#/components/schemas/OfficialRolloutPayload'
+            - $ref: '#/components/schemas/OfficialEmptyPayload'
+
+    OfficialDefinitionReservePayload:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        icon_media_type: { type: string, enum: [image/png, image/webp] }
+        icon_data: { type: string, format: byte, maxLength: 699052 }
+
+    OfficialDraftCreatePayload:
+      type: object
+      additionalProperties: false
+      required: [definition_id, kind, display_name, manifest, bundle]
+      properties:
+        definition_id: { type: string, format: uuid }
+        base_version_id: { type: string, format: uuid }
+        kind: { type: string, enum: [initial, next] }
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        icon_media_type: { type: string, enum: [image/png, image/webp] }
+        icon_data: { type: string, format: byte, maxLength: 699052 }
+        manifest: { $ref: '#/components/schemas/OfficialManifest' }
+        bundle: { $ref: '#/components/schemas/OfficialBundle' }
+
+    OfficialDraftUpdatePayload:
+      type: object
+      additionalProperties: false
+      required: [kind, display_name, manifest, bundle]
+      properties:
+        base_version_id: { type: string, format: uuid }
+        kind: { type: string, enum: [initial, next] }
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        icon_media_type: { type: string, enum: [image/png, image/webp] }
+        icon_data: { type: string, format: byte, maxLength: 699052 }
+        manifest: { $ref: '#/components/schemas/OfficialManifest' }
+        bundle: { $ref: '#/components/schemas/OfficialBundle' }
+
+    OfficialEmptyPayload:
+      type: object
+      additionalProperties: false
+
+    OfficialReviewPayload:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approve, reject] }
+        review_reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        safe_note: { type: string, maxLength: 500 }
+        initial_channels:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items: { type: string, enum: [internal, stable] }
+
+    OfficialActivatePayload:
+      type: object
+      additionalProperties: false
+      required: [version_id, rollout_basis_points, minimum_desktop_version, allowlisted_user_ids]
+      properties:
+        version_id: { type: string, format: uuid }
+        rollout_basis_points: { type: integer, minimum: 0, maximum: 10000 }
+        minimum_desktop_version: { type: string, minLength: 1, maxLength: 64 }
+        allowlisted_user_ids:
+          type: array
+          maxItems: 10000
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    OfficialRolloutPayload:
+      type: object
+      additionalProperties: false
+      required: [rollout_basis_points, minimum_desktop_version, allowlisted_user_ids]
+      properties:
+        rollout_basis_points: { type: integer, minimum: 0, maximum: 10000 }
+        minimum_desktop_version: { type: string, minLength: 1, maxLength: 64 }
+        allowlisted_user_ids:
+          type: array
+          maxItems: 10000
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    OfficialRollbackRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - target_version_id
+        - target_release_revision_id
+        - expected_head_revision
+        - target_digest
+        - reason_code
+      properties:
+        target_version_id: { type: string, format: uuid }
+        target_release_revision_id: { type: string, format: uuid }
+        expected_head_revision: { type: integer, minimum: 1 }
+        target_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$' }
+        note: { type: string, maxLength: 500 }
+
+    OfficialManifest:
+      type: object
+      additionalProperties: false
+      required: [schema_version, identity, assets, model_constraints, tools, dependencies, runtime_compatibility]
+      properties:
+        schema_version: { type: integer, enum: [1] }
+        identity: { $ref: '#/components/schemas/OfficialIdentity' }
+        assets:
+          type: array
+          maxItems: 128
+          items: { $ref: '#/components/schemas/OfficialManifestAsset' }
+        model_constraints: { $ref: '#/components/schemas/OfficialModelConstraints' }
+        tools: { $ref: '#/components/schemas/OfficialToolPolicy' }
+        dependencies:
+          type: array
+          maxItems: 128
+          items: { $ref: '#/components/schemas/OfficialDependency' }
+        runtime_compatibility: { $ref: '#/components/schemas/OfficialRuntimeCompatibility' }
+
+    OfficialIdentity:
+      type: object
+      additionalProperties: false
+      required: [system_prompt]
+      properties:
+        system_prompt: { type: string, minLength: 1, maxLength: 262144 }
+
+    OfficialManifestAsset:
+      type: object
+      additionalProperties: false
+      required: [path, kind, media_type, sha256]
+      properties:
+        path: { type: string, minLength: 1, maxLength: 512 }
+        kind: { type: string, enum: [skill, sop, knowledge] }
+        media_type: { type: string, enum: [text/markdown, text/plain] }
+        sha256: { $ref: '#/components/schemas/SHA256Digest' }
+
+    OfficialModelConstraints:
+      type: object
+      additionalProperties: false
+      required: [allowed_providers, allowed_models]
+      properties:
+        allowed_providers:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 128 }
+        allowed_models:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 256 }
+
+    OfficialToolPolicy:
+      type: object
+      additionalProperties: false
+      required: [allowed, denied]
+      properties:
+        allowed:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 256 }
+        denied:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 256 }
+
+    OfficialDependency:
+      type: object
+      additionalProperties: false
+      required: [agent_definition_id, agent_version_id]
+      properties:
+        agent_definition_id: { type: string, format: uuid }
+        agent_version_id: { type: string, format: uuid }
+
+    OfficialRuntimeCompatibility:
+      type: object
+      additionalProperties: false
+      required: [minimum_version]
+      properties:
+        minimum_version: { type: string, minLength: 1, maxLength: 64 }
+        maximum_version_exclusive: { type: string, minLength: 1, maxLength: 64 }
+
+    OfficialBundle:
+      type: object
+      additionalProperties: false
+      required: [assets]
+      properties:
+        assets:
+          type: array
+          maxItems: 128
+          items: { $ref: '#/components/schemas/OfficialBundleAsset' }
+
+    OfficialBundleAsset:
+      type: object
+      additionalProperties: false
+      required: [path, content]
+      properties:
+        path: { type: string, minLength: 1, maxLength: 512 }
+        content: { type: string, maxLength: 262144 }
+
+    OfficialDefinition:
+      type: object
+      additionalProperties: false
+      required: [definition_id, platform_id, display_name, status, created_by_admin_id, created_at, updated_at]
+      properties:
+        definition_id: { type: string, format: uuid }
+        platform_id: { type: string, format: uuid }
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        icon_media_type: { type: string, enum: [image/png, image/webp] }
+        icon_data: { type: string, format: byte, maxLength: 699052 }
+        status: { type: string, enum: [active, archived] }
+        latest_version_id: { type: string, format: uuid }
+        created_by_admin_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        replayed: { type: boolean }
+
+    OfficialDefinitionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialDefinition' } }
+        next_cursor: { type: string, format: uuid }
+
+    OfficialDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - draft_id
+        - platform_id
+        - definition_id
+        - kind
+        - display_name
+        - manifest
+        - bundle
+        - manifest_digest
+        - bundle_digest
+        - content_digest
+        - revision
+        - status
+        - last_editor_admin_id
+        - last_editor_role
+        - created_at
+        - updated_at
+      properties:
+        draft_id: { type: string, format: uuid }
+        platform_id: { type: string, format: uuid }
+        definition_id: { type: string, format: uuid }
+        base_version_id: { type: string, format: uuid }
+        kind: { type: string, enum: [initial, next] }
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        icon_media_type: { type: string, enum: [image/png, image/webp] }
+        icon_data: { type: string, format: byte, maxLength: 699052 }
+        manifest: { $ref: '#/components/schemas/OfficialManifest' }
+        bundle: { $ref: '#/components/schemas/OfficialBundle' }
+        manifest_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        bundle_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        content_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        revision: { type: integer, minimum: 1 }
+        status: { type: string, enum: [active, archived] }
+        last_editor_admin_id: { type: string, format: uuid }
+        last_editor_role: { $ref: '#/components/schemas/AdminRole' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        replayed: { type: boolean }
+
+    OfficialDraftPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialDraft' } }
+        next_cursor: { type: string, format: uuid }
+
+    OfficialDraftValidation:
+      type: object
+      additionalProperties: false
+      required: [draft_id, draft_revision, content_digest, dlp_version, valid, findings]
+      properties:
+        draft_id: { type: string, format: uuid }
+        draft_revision: { type: integer, minimum: 1 }
+        content_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        dlp_version: { type: string, minLength: 1, maxLength: 128 }
+        valid: { type: boolean }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/OfficialValidationFinding' }
+
+    OfficialValidationFinding:
+      type: object
+      additionalProperties: false
+      required: [code, path]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 100 }
+        path: { type: string, minLength: 1, maxLength: 512 }
+        line: { type: integer, minimum: 1 }
+
+    OfficialReview:
+      type: object
+      additionalProperties: false
+      required:
+        - review_id
+        - reviewer_admin_id
+        - reviewer_role
+        - decision
+        - platform_policy_snapshot_id
+        - platform_policy_version
+        - reviewed_content_digest
+        - reviewed_at
+      properties:
+        review_id: { type: string, format: uuid }
+        reviewer_admin_id: { type: string, format: uuid }
+        reviewer_role: { type: string, enum: [super_admin] }
+        decision: { type: string, enum: [approve, reject] }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        safe_note: { type: string, maxLength: 500 }
+        platform_policy_snapshot_id: { type: string, format: uuid }
+        platform_policy_version: { type: integer, minimum: 1 }
+        reviewed_content_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        reviewed_at: { type: string, format: date-time }
+
+    OfficialSubmission:
+      type: object
+      additionalProperties: false
+      required:
+        - submission_id
+        - platform_id
+        - draft_id
+        - draft_revision
+        - definition_id
+        - kind
+        - display_name
+        - manifest
+        - bundle
+        - manifest_digest
+        - bundle_digest
+        - content_digest
+        - submitted_by_admin_id
+        - submitted_by_role
+        - status
+        - revision
+        - submitted_at
+        - updated_at
+      properties:
+        submission_id: { type: string, format: uuid }
+        platform_id: { type: string, format: uuid }
+        draft_id: { type: string, format: uuid }
+        draft_revision: { type: integer, minimum: 1 }
+        definition_id: { type: string, format: uuid }
+        base_version_id: { type: string, format: uuid }
+        kind: { type: string, enum: [initial, next] }
+        display_name: { type: string, minLength: 1, maxLength: 100 }
+        icon_media_type: { type: string, enum: [image/png, image/webp] }
+        icon_data: { type: string, format: byte, maxLength: 699052 }
+        manifest: { $ref: '#/components/schemas/OfficialManifest' }
+        bundle: { $ref: '#/components/schemas/OfficialBundle' }
+        manifest_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        bundle_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        content_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        submitted_by_admin_id: { type: string, format: uuid }
+        submitted_by_role: { type: string, enum: [developer] }
+        status: { type: string, enum: [pending, approved, rejected, withdrawn, superseded] }
+        revision: { type: integer, minimum: 1 }
+        submitted_at: { type: string, format: date-time }
+        terminal_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        review: { $ref: '#/components/schemas/OfficialReview' }
+        replayed: { type: boolean }
+
+    OfficialSubmissionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialSubmission' } }
+        next_cursor: { type: string, format: uuid }
+
+    OfficialVersion:
+      type: object
+      additionalProperties: false
+      required:
+        - version_id
+        - definition_id
+        - version_number
+        - manifest
+        - bundle
+        - content_digest
+        - runtime_minimum_version
+        - published_at
+      properties:
+        version_id: { type: string, format: uuid }
+        definition_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        manifest: { $ref: '#/components/schemas/OfficialManifest' }
+        bundle: { $ref: '#/components/schemas/OfficialBundle' }
+        content_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        runtime_minimum_version: { type: string, minLength: 1, maxLength: 64 }
+        runtime_maximum_version_exclusive: { type: string, minLength: 1, maxLength: 64 }
+        published_at: { type: string, format: date-time }
+
+    OfficialVersionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialVersion' } }
+        next_cursor: { type: string, format: uuid }
+
+    OfficialRelease:
+      type: object
+      additionalProperties: false
+      required:
+        - release_id
+        - platform_id
+        - definition_id
+        - channel
+        - current_revision_id
+        - head_revision
+        - agent_version_id
+        - state
+        - rollout_basis_points
+        - minimum_desktop_version
+        - action
+        - actor_admin_id
+        - actor_admin_role
+        - reason_code
+        - audience_count
+        - created_at
+        - updated_at
+      properties:
+        release_id: { type: string, format: uuid }
+        platform_id: { type: string, format: uuid }
+        definition_id: { type: string, format: uuid }
+        channel: { type: string, enum: [internal, stable] }
+        current_revision_id: { type: string, format: uuid }
+        head_revision: { type: integer, minimum: 1 }
+        agent_version_id: { type: string, format: uuid }
+        state: { type: string, enum: [active, paused] }
+        rollout_basis_points: { type: integer, minimum: 0, maximum: 10000 }
+        minimum_desktop_version: { type: string, minLength: 1, maxLength: 64 }
+        action: { type: string, enum: [initial, activate, rollout_update, pause, resume, rollback] }
+        previous_revision_id: { type: string, format: uuid }
+        rollback_target_revision_id: { type: string, format: uuid }
+        actor_admin_id: { type: string, format: uuid }
+        actor_admin_role: { $ref: '#/components/schemas/AdminRole' }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, minLength: 1, maxLength: 128 }
+        audience_count: { type: integer, minimum: 0, maximum: 10000 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        replayed: { type: boolean }
+
+    OfficialReleasePage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialRelease' } }
+        next_cursor: { type: string, format: uuid }
+
+    OfficialOperation:
+      type: object
+      additionalProperties: false
+      required: [operation_id, state, updated_at]
+      properties:
+        operation_id: { type: string, format: uuid }
+        state: { type: string, enum: [queued, executing, reconciling, succeeded, failed, conflict] }
+        error_code: { type: string, pattern: '^[A-Z][A-Z0-9_]{2,99}$' }
+        updated_at: { type: string, format: date-time }
+
+    OfficialRollbackApproval:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - release_id
+        - target_version_id
+        - target_release_revision_id
+        - expected_head_revision
+        - target_digest
+        - requested_by_admin_id
+        - reason_code
+        - approval_status
+        - execution_status
+        - expires_at
+        - created_at
+        - updated_at
+        - version
+      properties:
+        id: { type: string, format: uuid }
+        release_id: { type: string, format: uuid }
+        target_version_id: { type: string, format: uuid }
+        target_release_revision_id: { type: string, format: uuid }
+        expected_head_revision: { type: integer, minimum: 1 }
+        target_digest: { $ref: '#/components/schemas/SHA256Digest' }
+        requested_by_admin_id: { type: string, format: uuid }
+        reviewed_by_admin_id: { type: string, format: uuid }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        ticket_reference: { type: string, maxLength: 128 }
+        safe_note: { type: string, maxLength: 500 }
+        approval_status: { type: string, enum: [pending_review, approved, rejected, cancelled, expired] }
+        execution_status: { type: string, enum: [not_started, queued, executing, reconciling, succeeded, failed, conflict] }
+        operation_id: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        reviewed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/OfficialRollbackEvent' }
+
+    OfficialRollbackEvent:
+      type: object
+      additionalProperties: false
+      required: [id, event_type, actor_admin_id, actor_role, approval_status, execution_status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        event_type: { type: string, enum: [requested, approved, rejected, cancelled, expired, queued, executing, reconciling, succeeded, failed, conflict] }
+        actor_admin_id: { type: string, format: uuid }
+        actor_role: { $ref: '#/components/schemas/AdminRole' }
+        approval_status: { type: string, enum: [pending_review, approved, rejected, cancelled, expired] }
+        execution_status: { type: string, enum: [not_started, queued, executing, reconciling, succeeded, failed, conflict] }
+        operation_id: { type: string, format: uuid }
+        error_code: { type: string, pattern: '^[A-Z][A-Z0-9_]{2,99}$' }
+        created_at: { type: string, format: date-time }
+
+    OfficialRollbackPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialRollbackApproval' } }
+        next_cursor: { type: string, maxLength: 512, pattern: '^[A-Za-z0-9_-]+$' }
+
+    OfficialAuditEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, event_type, object_type, object_id, outcome, request_id, actor_admin_id, actor_admin_role, created_at]
+      properties:
+        event_id: { type: string, format: uuid }
+        event_type: { type: string, minLength: 1, maxLength: 128, pattern: '^official_' }
+        object_type: { type: string, minLength: 1, maxLength: 128 }
+        object_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [success, denied] }
+        reason_code: { type: string, pattern: '^[a-z][a-z0-9_]{2,63}$' }
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+        actor_admin_id: { type: string, format: uuid }
+        actor_admin_role: { $ref: '#/components/schemas/AdminRole' }
+        created_at: { type: string, format: date-time }
+
+    OfficialAuditPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OfficialAuditEvent' } }
+        next_cursor: { type: string, maxLength: 512 }
 
     LoginRequest:
       type: object
@@ -1613,6 +2666,105 @@ components:
             message: { type: string }
 
   responses:
+    OfficialDefinition:
+      description: 一个安全的官方 Agent 定义
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialDefinition' }
+    OfficialDefinitionPage:
+      description: 官方 Agent 定义页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialDefinitionPage' }
+    OfficialDraft:
+      description: 角色授权范围内的官方 Agent 草稿
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialDraft' }
+    OfficialDraftPage:
+      description: 官方 Agent 草稿页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialDraftPage' }
+    OfficialDraftValidation:
+      description: 不含敏感内容回显的草稿校验结果
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialDraftValidation' }
+    OfficialSubmission:
+      description: 冻结的官方 Agent 提交及安全审核信息
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialSubmission' }
+    OfficialSubmissionPage:
+      description: 官方 Agent 提交页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialSubmissionPage' }
+    OfficialVersionPage:
+      description: 官方 Agent 不可变版本页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialVersionPage' }
+    OfficialRelease:
+      description: 官方 Agent 当前发布头，不包含完整允许名单
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialRelease' }
+    OfficialReleasePage:
+      description: 官方 Agent 发布页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialReleasePage' }
+    OfficialOperation:
+      description: 本地排队或对账状态；只有 Cloud 确认后才为 succeeded
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialOperation' }
+    OfficialRollbackApproval:
+      description: 双人控制的官方 Agent 回滚审批状态
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialRollbackApproval' }
+    OfficialRollbackPage:
+      description: 按角色过滤后的官方 Agent 回滚审批页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialRollbackPage' }
+    OfficialAuditPage:
+      description: 不含运行数据、密钥或完整允许名单的官方 Agent 审计页
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OfficialAuditPage' }
+    OfficialConflict:
+      description: 幂等键、审批、自审、版本或摘要状态冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          examples:
+            digest: { value: { error: { code: TARGET_DIGEST_MISMATCH, message: 目标内容已变化，请刷新后重试 } } }
+            selfReview: { value: { error: { code: SELF_REVIEW_FORBIDDEN, message: 发起人不能审批自己的申请 } } }
+            idempotency: { value: { error: { code: IDEMPOTENCY_KEY_REUSED, message: 幂等键已用于其他操作 } } }
+    OfficialDLPBlocked:
+      description: 官方 Agent 内容未通过发布前敏感信息检查
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: PUBLICATION_DLP_BLOCKED, message: 发布内容未通过敏感信息检查 } }
+    OfficialContractViolation:
+      description: Cloud 响应不符合固定安全契约
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          example: { error: { code: CLOUD_CONTRACT_VIOLATION, message: Cloud 管理服务响应不符合安全契约 } }
+    OfficialCloudUnavailable:
+      description: Cloud 未配置或不可用；浏览器不得收到伪造成功状态
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorDocument' }
+          examples:
+            unavailable: { value: { error: { code: CLOUD_UNAVAILABLE, message: Cloud 管理服务暂时不可用 } } }
+            notConfigured: { value: { error: { code: CLOUD_NOT_CONFIGURED, message: Cloud 管理服务尚未配置 } } }
     CloudUserPage:
       description: 仅含脱敏身份的 Cloud 用户页
       content:

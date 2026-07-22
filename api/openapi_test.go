@@ -43,8 +43,8 @@ func TestOpenAPIContract(t *testing.T) {
 		t.Fatalf("OpenAPI version = %v, want 3.1.0", document["openapi"])
 	}
 	paths := object(t, document["paths"], "paths")
-	if len(paths) != 32 {
-		t.Fatalf("OpenAPI path count = %d, want 32", len(paths))
+	if len(paths) != 55 {
+		t.Fatalf("OpenAPI path count = %d, want 55", len(paths))
 	}
 	operationIDs := make(map[string]string)
 	for path, rawPathItem := range paths {
@@ -88,6 +88,89 @@ func TestOpenAPIContract(t *testing.T) {
 	assertSessionAndCSRF(t, roleOperation, "/admin-users/{adminID}/role")
 
 	walkReferences(t, document, document, "#")
+}
+
+func TestOfficialAgentBrowserContractIsStrictAndRoleBounded(t *testing.T) {
+	raw := readContract(t, "openapi/admin.yaml")
+	for _, operationID := range []string{
+		"listOfficialAgents", "reserveOfficialAgent", "getOfficialAgent", "listOfficialAgentDrafts",
+		"createOfficialAgentDraft", "getOfficialAgentDraft", "updateOfficialAgentDraft", "validateOfficialAgentDraft",
+		"submitOfficialAgentDraft", "listOfficialAgentSubmissions", "getOfficialAgentSubmission",
+		"withdrawOfficialAgentSubmission", "reviewOfficialAgentSubmission", "listOfficialAgentVersions",
+		"listOfficialAgentReleases", "getOfficialAgentRelease", "activateOfficialAgentRelease",
+		"updateOfficialAgentRollout", "pauseOfficialAgentRelease", "resumeOfficialAgentRelease",
+		"requestOfficialAgentRollback", "listOfficialAgentRollbackRequests", "approveOfficialAgentRollback",
+		"rejectOfficialAgentRollback", "cancelOfficialAgentRollback", "listOfficialAgentAuditEvents",
+	} {
+		if !strings.Contains(raw, "operationId: "+operationID) {
+			t.Errorf("missing official Agent operation %s", operationID)
+		}
+	}
+	for _, stableCode := range []string{
+		"CLOUD_UNAVAILABLE", "CLOUD_CONTRACT_VIOLATION", "PUBLICATION_DLP_BLOCKED",
+		"TARGET_DIGEST_MISMATCH", "SELF_REVIEW_FORBIDDEN", "IDEMPOTENCY_KEY_REUSED",
+	} {
+		if !strings.Contains(raw, stableCode) {
+			t.Errorf("missing official Agent error code %s", stableCode)
+		}
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := object(t, document["paths"], "paths")
+	for path, method := range map[string]string{
+		"/official-agents":                                       "post",
+		"/official-agent-drafts":                                 "post",
+		"/official-agent-drafts/{draftID}":                       "patch",
+		"/official-agent-drafts/{draftID}/submit":                "post",
+		"/official-agent-submissions/{submissionID}/withdraw":    "post",
+		"/official-agent-submissions/{submissionID}/review":      "post",
+		"/official-agent-releases/{releaseID}/activate":          "post",
+		"/official-agent-releases/{releaseID}/rollout":           "post",
+		"/official-agent-releases/{releaseID}/pause":             "post",
+		"/official-agent-releases/{releaseID}/resume":            "post",
+		"/official-agent-releases/{releaseID}/rollback-requests": "post",
+		"/official-agent-rollback-requests/{approvalID}/approve": "post",
+		"/official-agent-rollback-requests/{approvalID}/reject":  "post",
+		"/official-agent-rollback-requests/{approvalID}/cancel":  "post",
+	} {
+		operation := object(t, object(t, paths[path], path)[method], path+" "+method)
+		assertSessionAndCSRF(t, operation, path)
+		parameters, ok := operation["parameters"].([]any)
+		if !ok || len(parameters) == 0 {
+			t.Errorf("official mutation %s has no Idempotency-Key parameter", path)
+		}
+	}
+	schemas := object(t, object(t, document["components"], "components")["schemas"], "schemas")
+	for _, name := range []string{
+		"OfficialMutationRequest", "OfficialRollbackRequest", "OfficialDefinition", "OfficialDraft",
+		"OfficialDraftValidation", "OfficialSubmission", "OfficialVersion", "OfficialRelease",
+		"OfficialRollbackApproval", "OfficialOperation", "OfficialAuditEvent",
+	} {
+		schema := object(t, schemas[name], name)
+		if schema["additionalProperties"] != false {
+			t.Errorf("%s is not additionalProperties:false", name)
+		}
+	}
+	officialSchemas := make(map[string]any)
+	for name, schema := range schemas {
+		if strings.HasPrefix(name, "Official") {
+			officialSchemas[name] = schema
+		}
+	}
+	officialEncoded, err := yaml.Marshal(officialSchemas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		"service_token", "certificate", "private_key", "rollout_key", "profile_path", "hermes_home",
+		"memory", "session", "api_key", "source_ip_hmac", "user_agent",
+	} {
+		if strings.Contains(strings.ToLower(string(officialEncoded)), forbidden+":") {
+			t.Errorf("official Admin contract exposes forbidden field %s", forbidden)
+		}
+	}
 }
 
 func TestAuditBrowserContractUsesSafeCursorProjection(t *testing.T) {

@@ -30,20 +30,30 @@ func TestNewHTTPServerUsesBoundedTimeouts(t *testing.T) {
 	}
 }
 
-func TestNewAdminRouterRegistersAuditAndSettingsRoutes(t *testing.T) {
+func TestNewAdminRouterRegistersAuditSettingsAndOfficialAgentRoutes(t *testing.T) {
 	auditHandler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusNoContent)
 	})
 	settingsHandler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusAccepted)
 	})
-	router := newAdminRouter(http.NotFoundHandler(), http.NotFoundHandler(), http.NotFoundHandler(), auditHandler, settingsHandler)
+	officialHandler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusCreated)
+	})
+	router := newAdminRouter(http.NotFoundHandler(), http.NotFoundHandler(), http.NotFoundHandler(), auditHandler, settingsHandler, officialHandler)
 	for path, expected := range map[string]int{
-		"/audit-events":                    http.StatusNoContent,
-		"/system/settings":                 http.StatusAccepted,
-		"/system/settings/security-policy": http.StatusAccepted,
-		"/system/reason-codes":             http.StatusAccepted,
-		"/system/reason-codes/test_reason": http.StatusAccepted,
+		"/audit-events":                     http.StatusNoContent,
+		"/system/settings":                  http.StatusAccepted,
+		"/system/settings/security-policy":  http.StatusAccepted,
+		"/system/reason-codes":              http.StatusAccepted,
+		"/system/reason-codes/test_reason":  http.StatusAccepted,
+		"/official-agents":                  http.StatusCreated,
+		"/official-agent-drafts":            http.StatusCreated,
+		"/official-agent-submissions":       http.StatusCreated,
+		"/official-agent-versions":          http.StatusCreated,
+		"/official-agent-releases":          http.StatusCreated,
+		"/official-agent-rollback-requests": http.StatusCreated,
+		"/official-agent-audit-events":      http.StatusCreated,
 	} {
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
@@ -112,7 +122,12 @@ func TestBuildAdminRuntimeWiresPublicAuthProtectedRoutesAndWorker(t *testing.T) 
 	`).Scan(&sourceHMACLength); err != nil || sourceHMACLength != 32 {
 		t.Fatalf("login failure source IP audit length/error = %d/%v", sourceHMACLength, err)
 	}
-	for _, path := range []string{"/admin-users", "/audit-events", "/system/settings", "/system/reason-codes?usage=session"} {
+	for _, path := range []string{
+		"/admin-users", "/audit-events", "/system/settings", "/system/reason-codes?usage=session",
+		"/official-agents", "/official-agent-drafts", "/official-agent-submissions",
+		"/official-agent-versions", "/official-agent-releases", "/official-agent-rollback-requests",
+		"/official-agent-audit-events",
+	} {
 		protectedRequest := httptest.NewRequest(http.MethodGet, path, nil)
 		protectedRequest.RemoteAddr = "192.0.2.20:4242"
 		protectedResponse := httptest.NewRecorder()

@@ -110,7 +110,9 @@ func NewHandlerWithLogger(service HandlerService, logger *slog.Logger) http.Hand
 	router.With(requirePermission(rbac.ApproveAccountLifecycle), recentTOTP()).Post("/approval-requests/{approvalID}/approve", approveApprovalHTTP(service))
 	router.With(requirePermission(rbac.ApproveAccountLifecycle), recentTOTP()).Post("/approval-requests/{approvalID}/reject", rejectApprovalHTTP(service))
 	router.With(requirePermission(rbac.InitiateAccountLifecycle), recentTOTP()).Post("/approval-requests/{approvalID}/cancel", cancelApprovalHTTP(service))
-	router.With(anyPermission(rbac.RevokeCloudDevice, rbac.RevokeCloudSession, rbac.ApproveAccountLifecycle)).Get("/operations/{operationID}", getOperationHTTP(service))
+	router.With(anyPermission(
+		rbac.RevokeCloudDevice, rbac.RevokeCloudSession, rbac.ApproveAccountLifecycle, rbac.ReadOfficialAgents,
+	)).Get("/operations/{operationID}", getOperationHTTP(service))
 	router.With(requirePermission(rbac.ReadServiceHealth)).Get("/system/health", healthHTTP(service))
 	return noStore(router)
 }

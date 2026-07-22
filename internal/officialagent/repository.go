@@ -2,8 +2,10 @@ package officialagent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/admin"
@@ -201,6 +203,99 @@ func (repository *repository) GetRollback(ctx context.Context, actor admin.Actor
 		return RollbackApproval{}, errors.New("official Agent rollback events could not be read")
 	}
 	return approval, nil
+}
+
+type rollbackCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+func encodeRollbackCursor(value rollbackCursor) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(
+		value.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + value.ID.String(),
+	))
+}
+
+func decodeRollbackCursor(raw string) (*rollbackCursor, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil || len(decoded) > 128 {
+		return nil, ErrInvalidRequest
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 2 {
+		return nil, ErrInvalidRequest
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return nil, ErrInvalidRequest
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil || id == uuid.Nil {
+		return nil, ErrInvalidRequest
+	}
+	return &rollbackCursor{CreatedAt: createdAt, ID: id}, nil
+}
+
+func (repository *repository) ListRollbacks(ctx context.Context, actor admin.Actor, filter ListFilter) (RollbackPage, error) {
+	if actor.AdminID == uuid.Nil || (actor.Role != rbac.Operator && actor.Role != rbac.SuperAdmin && actor.Role != rbac.Auditor) {
+		return RollbackPage{}, ErrPermissionDenied
+	}
+	if filter.Limit < 1 || filter.Limit > 100 {
+		return RollbackPage{}, ErrInvalidRequest
+	}
+	cursor, err := decodeRollbackCursor(filter.Cursor)
+	if err != nil {
+		return RollbackPage{}, err
+	}
+	view := filter.View
+	if actor.Role == rbac.Operator {
+		view = "mine"
+	}
+	if actor.Role == rbac.Auditor {
+		view = "all"
+	}
+	if view != "mine" && view != "pending_for_me" && view != "all" {
+		return RollbackPage{}, ErrInvalidRequest
+	}
+	var cursorTime any
+	var cursorID any
+	if cursor != nil {
+		cursorTime, cursorID = cursor.CreatedAt, cursor.ID
+	}
+	rows, err := repository.postgres.Query(ctx, `
+		SELECT `+rollbackColumns+`
+		FROM official_agent_rollback_requests
+		WHERE ($1 <> 'mine' OR requested_by_admin_id = $2)
+		  AND ($1 <> 'pending_for_me' OR (approval_status = 'pending_review' AND requested_by_admin_id <> $2))
+		  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4::uuid))
+		ORDER BY created_at DESC, id DESC
+		LIMIT $5
+	`, view, actor.AdminID, cursorTime, cursorID, filter.Limit+1)
+	if err != nil {
+		return RollbackPage{}, errors.New("official Agent rollback requests could not be listed")
+	}
+	defer rows.Close()
+	items := make([]RollbackApproval, 0, filter.Limit+1)
+	for rows.Next() {
+		item, err := scanRollback(rows)
+		if err != nil {
+			return RollbackPage{}, err
+		}
+		items = append(items, item)
+	}
+	if rows.Err() != nil {
+		return RollbackPage{}, errors.New("official Agent rollback requests could not be read")
+	}
+	page := RollbackPage{Items: items}
+	if len(items) > filter.Limit {
+		page.Items = items[:filter.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor = encodeRollbackCursor(rollbackCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+	}
+	return page, nil
 }
 
 var _ operations.ExecutionSink = (*Service)(nil)

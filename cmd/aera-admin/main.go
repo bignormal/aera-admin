@@ -20,6 +20,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/cloudcontrol"
 	"github.com/bignormal/aera-admin/internal/config"
 	"github.com/bignormal/aera-admin/internal/httpapi"
+	"github.com/bignormal/aera-admin/internal/officialagent"
 	"github.com/bignormal/aera-admin/internal/operations"
 	"github.com/bignormal/aera-admin/internal/secure"
 	adminsettings "github.com/bignormal/aera-admin/internal/settings"
@@ -210,10 +211,25 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 	if err != nil {
 		return adminRuntime{}, err
 	}
+	officialService, err := officialagent.NewService(officialagent.ServiceConfig{
+		PostgreSQL: postgres,
+		Cloud:      cloudClient,
+		Operations: operationService,
+		Audit:      auditService,
+		Reasons:    settingsStore,
+		Clock:      time.Now,
+	})
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	executionSink, err := operations.CombineExecutionSinks(approvalService, officialService)
+	if err != nil {
+		return adminRuntime{}, err
+	}
 	worker, err := operations.NewWorker(operations.WorkerConfig{
 		Operations:    operationService,
 		Cloud:         cloudClient,
-		ExecutionSink: approvalService,
+		ExecutionSink: executionSink,
 		Clock:         time.Now,
 		PollInterval:  time.Second,
 		BatchSize:     8,
@@ -237,7 +253,8 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 	}
 	auditHandler := audithttp.NewHandler(auditService)
 	cloudHandler := cloudcontrol.NewHandler(cloudService)
-	router := newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler)
+	officialHandler := officialagent.NewHandler(officialService)
+	router := newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler, officialHandler)
 	browserSecurity, err := adminauth.NewBrowserSecurity(adminauth.BrowserSecurityConfig{
 		Service: authService, PublicURL: settings.PublicURL, SourceIPHMACKey: settings.SessionHMACKey,
 		TrustedProxyCIDRs: settings.TrustedProxyCIDRs,
@@ -248,7 +265,7 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 	return adminRuntime{API: browserSecurity.Wrap(router), Worker: worker}, nil
 }
 
-func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler http.Handler) *http.ServeMux {
+func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler, officialHandler http.Handler) *http.ServeMux {
 	router := http.NewServeMux()
 	for _, path := range []string{"/auth/login", "/auth/totp/verify", "/auth/step-up", "/auth/logout", "/me"} {
 		router.Handle(path, authHandler)
@@ -265,6 +282,14 @@ func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandle
 	router.Handle("/audit-events", auditHandler)
 	for _, path := range []string{"/system/settings", "/system/settings/", "/system/reason-codes", "/system/reason-codes/"} {
 		router.Handle(path, settingsHandler)
+	}
+	for _, path := range []string{
+		"/official-agents", "/official-agents/", "/official-agent-drafts", "/official-agent-drafts/",
+		"/official-agent-submissions", "/official-agent-submissions/", "/official-agent-versions",
+		"/official-agent-releases", "/official-agent-releases/", "/official-agent-rollback-requests",
+		"/official-agent-rollback-requests/", "/official-agent-audit-events",
+	} {
+		router.Handle(path, officialHandler)
 	}
 	return router
 }

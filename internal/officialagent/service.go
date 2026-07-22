@@ -73,12 +73,40 @@ func (service *Service) ListDefinitions(ctx context.Context, actor admin.Actor, 
 	return result, mapCloudError(err)
 }
 
+func (service *Service) GetDefinition(ctx context.Context, actor admin.Actor, id uuid.UUID) (cloudadmin.OfficialDefinitionDetail, error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.OfficialDefinitionDetail{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.OfficialDefinitionDetail{}, ErrPermissionDenied
+	}
+	if id == uuid.Nil {
+		return cloudadmin.OfficialDefinitionDetail{}, ErrInvalidRequest
+	}
+	result, err := service.cloud.GetOfficialDefinition(ctx, officialActor(actor), id)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) ListDrafts(ctx context.Context, actor admin.Actor, page cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.OfficialDraft], error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.Page[cloudadmin.OfficialDraft]{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.Page[cloudadmin.OfficialDraft]{}, ErrPermissionDenied
+	}
+	result, err := service.cloud.ListOfficialDrafts(ctx, officialActor(actor), page)
+	return result, mapCloudError(err)
+}
+
 func (service *Service) GetDraft(ctx context.Context, actor admin.Actor, id uuid.UUID) (cloudadmin.OfficialDraft, error) {
 	if service == nil || service.cloud == nil {
 		return cloudadmin.OfficialDraft{}, cloudadmin.ErrUnavailable
 	}
-	if !validReadActor(actor, rbac.ReadOfficialAgents) || id == uuid.Nil {
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
 		return cloudadmin.OfficialDraft{}, ErrPermissionDenied
+	}
+	if id == uuid.Nil {
+		return cloudadmin.OfficialDraft{}, ErrInvalidRequest
 	}
 	result, err := service.cloud.GetOfficialDraft(ctx, officialActor(actor), id)
 	return result, mapCloudError(err)
@@ -88,11 +116,93 @@ func (service *Service) ValidateDraft(ctx context.Context, actor admin.Actor, id
 	if service == nil || service.cloud == nil {
 		return cloudadmin.OfficialDraftValidation{}, cloudadmin.ErrUnavailable
 	}
-	if !validReadActor(actor, rbac.ManageOfficialDrafts) || id == uuid.Nil {
+	if !validReadActor(actor, rbac.ManageOfficialDrafts) {
 		return cloudadmin.OfficialDraftValidation{}, ErrPermissionDenied
+	}
+	if id == uuid.Nil {
+		return cloudadmin.OfficialDraftValidation{}, ErrInvalidRequest
 	}
 	result, err := service.cloud.ValidateOfficialDraft(ctx, officialActor(actor), id)
 	return result, mapCloudError(err)
+}
+
+func (service *Service) ListSubmissions(ctx context.Context, actor admin.Actor, filter cloudadmin.OfficialSubmissionFilter) (cloudadmin.Page[cloudadmin.OfficialSubmission], error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.Page[cloudadmin.OfficialSubmission]{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.Page[cloudadmin.OfficialSubmission]{}, ErrPermissionDenied
+	}
+	result, err := service.cloud.ListOfficialSubmissions(ctx, officialActor(actor), filter)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) GetSubmission(ctx context.Context, actor admin.Actor, id uuid.UUID) (cloudadmin.OfficialSubmission, error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.OfficialSubmission{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.OfficialSubmission{}, ErrPermissionDenied
+	}
+	if id == uuid.Nil {
+		return cloudadmin.OfficialSubmission{}, ErrInvalidRequest
+	}
+	result, err := service.cloud.GetOfficialSubmission(ctx, officialActor(actor), id)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) ListVersions(ctx context.Context, actor admin.Actor, page cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.OfficialVersion], error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.Page[cloudadmin.OfficialVersion]{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.Page[cloudadmin.OfficialVersion]{}, ErrPermissionDenied
+	}
+	result, err := service.cloud.ListOfficialVersions(ctx, officialActor(actor), page)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) ListReleases(ctx context.Context, actor admin.Actor, page cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.OfficialRelease], error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.Page[cloudadmin.OfficialRelease]{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.Page[cloudadmin.OfficialRelease]{}, ErrPermissionDenied
+	}
+	result, err := service.cloud.ListOfficialReleases(ctx, officialActor(actor), page)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) GetRelease(ctx context.Context, actor admin.Actor, id uuid.UUID) (cloudadmin.OfficialReleaseDetail, error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.OfficialReleaseDetail{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgents) {
+		return cloudadmin.OfficialReleaseDetail{}, ErrPermissionDenied
+	}
+	if id == uuid.Nil {
+		return cloudadmin.OfficialReleaseDetail{}, ErrInvalidRequest
+	}
+	result, err := service.cloud.GetOfficialRelease(ctx, officialActor(actor), id)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) ListAudit(ctx context.Context, actor admin.Actor, page cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.OfficialAuditEvent], error) {
+	if service == nil || service.cloud == nil {
+		return cloudadmin.Page[cloudadmin.OfficialAuditEvent]{}, cloudadmin.ErrUnavailable
+	}
+	if !validReadActor(actor, rbac.ReadOfficialAgentAudit) {
+		return cloudadmin.Page[cloudadmin.OfficialAuditEvent]{}, ErrPermissionDenied
+	}
+	result, err := service.cloud.ListOfficialAudit(ctx, officialActor(actor), page)
+	return result, mapCloudError(err)
+}
+
+func (service *Service) ListRollbacks(ctx context.Context, actor admin.Actor, filter ListFilter) (RollbackPage, error) {
+	if service == nil || service.repository == nil {
+		return RollbackPage{}, errors.New("official Agent service is unavailable")
+	}
+	return service.repository.ListRollbacks(ctx, actor, filter)
 }
 
 func (service *Service) Enqueue(ctx context.Context, actor admin.Actor, request MutationRequest) (operations.Result, error) {
