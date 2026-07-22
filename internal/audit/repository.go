@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const auditChainAdvisoryLockID int64 = 0x41455241415544
@@ -27,6 +30,155 @@ func lockAuditActor(ctx context.Context, tx pgx.Tx, actorID *uuid.UUID) error {
 		return errors.New("administrator audit actor could not be locked")
 	}
 	return nil
+}
+
+func listAuditEvents(ctx context.Context, postgres *pgxpool.Pool, query Query) (Page, error) {
+	var statement strings.Builder
+	statement.WriteString(`
+		SELECT
+			id,
+			COALESCE(actor_admin_id::text, ''),
+			COALESCE(actor_role, ''),
+			event_type,
+			object_type,
+			COALESCE(object_id::text, ''),
+			outcome,
+			COALESCE(reason_code, ''),
+			COALESCE(ticket_reference, ''),
+			COALESCE(note, ''),
+			COALESCE(approval_id::text, ''),
+			COALESCE(operation_id::text, ''),
+			COALESCE(error_code, ''),
+			COALESCE(before_state, '{}'::jsonb)::text,
+			COALESCE(after_state, '{}'::jsonb)::text,
+			request_id,
+			created_at
+		FROM admin_audit_events
+		WHERE TRUE
+	`)
+	arguments := make([]any, 0, 12)
+	addArgument := func(value any) string {
+		arguments = append(arguments, value)
+		return fmt.Sprintf("$%d", len(arguments))
+	}
+	if query.Cursor != "" {
+		createdAt, id, err := DecodeCursor(query.Cursor)
+		if err != nil {
+			return Page{}, err
+		}
+		statement.WriteString(" AND (created_at, id) < (" + addArgument(createdAt) + ", " + addArgument(id) + ")")
+	}
+	if query.ActorAdminID != nil {
+		statement.WriteString(" AND actor_admin_id = " + addArgument(*query.ActorAdminID))
+	}
+	if query.EventType != "" {
+		statement.WriteString(" AND event_type = " + addArgument(query.EventType))
+	}
+	if query.ObjectType != "" {
+		statement.WriteString(" AND object_type = " + addArgument(query.ObjectType))
+	}
+	if query.ObjectID != nil {
+		statement.WriteString(" AND object_id = " + addArgument(*query.ObjectID))
+	}
+	if query.Outcome != "" {
+		statement.WriteString(" AND outcome = " + addArgument(query.Outcome))
+	}
+	if query.ReasonCode != "" {
+		statement.WriteString(" AND reason_code = " + addArgument(query.ReasonCode))
+	}
+	if !query.From.IsZero() {
+		statement.WriteString(" AND created_at >= " + addArgument(query.From.UTC()))
+	}
+	if !query.To.IsZero() {
+		statement.WriteString(" AND created_at < " + addArgument(query.To.UTC()))
+	}
+	statement.WriteString(" ORDER BY created_at DESC, id DESC LIMIT " + addArgument(query.Limit+1))
+
+	rows, err := postgres.Query(ctx, statement.String(), arguments...)
+	if err != nil {
+		return Page{}, errors.New("administrator audit events could not be read")
+	}
+	defer rows.Close()
+
+	items := make([]PublicEvent, 0, query.Limit+1)
+	for rows.Next() {
+		var item PublicEvent
+		var actorID, actorRole, objectID, approvalID, operationID string
+		var beforeState, afterState string
+		if err := rows.Scan(
+			&item.ID,
+			&actorID,
+			&actorRole,
+			&item.EventType,
+			&item.ObjectType,
+			&objectID,
+			&item.Outcome,
+			&item.ReasonCode,
+			&item.TicketReference,
+			&item.Note,
+			&approvalID,
+			&operationID,
+			&item.ErrorCode,
+			&beforeState,
+			&afterState,
+			&item.RequestID,
+			&item.CreatedAt,
+		); err != nil {
+			return Page{}, errors.New("administrator audit events contain an unreadable event")
+		}
+		item.ActorRole = rbac.Role(actorRole)
+		if item.ActorAdminID, err = parseOptionalUUID(actorID); err != nil {
+			return Page{}, ErrIntegrity
+		}
+		if item.ObjectID, err = parseOptionalUUID(objectID); err != nil {
+			return Page{}, ErrIntegrity
+		}
+		if item.ApprovalID, err = parseOptionalUUID(approvalID); err != nil {
+			return Page{}, ErrIntegrity
+		}
+		if item.OperationID, err = parseOptionalUUID(operationID); err != nil {
+			return Page{}, ErrIntegrity
+		}
+		if err := json.Unmarshal([]byte(beforeState), &item.BeforeState); err != nil {
+			return Page{}, ErrIntegrity
+		}
+		if err := json.Unmarshal([]byte(afterState), &item.AfterState); err != nil {
+			return Page{}, ErrIntegrity
+		}
+		if len(item.BeforeState) == 0 {
+			item.BeforeState = nil
+		}
+		if len(item.AfterState) == 0 {
+			item.AfterState = nil
+		}
+		prepared, prepareErr := prepareRecord(Record{
+			ActorAdminID: item.ActorAdminID, ActorRole: item.ActorRole,
+			EventType: item.EventType, ObjectType: item.ObjectType, ObjectID: item.ObjectID,
+			Outcome: item.Outcome, ReasonCode: item.ReasonCode,
+			TicketReference: item.TicketReference, Note: item.Note,
+			ApprovalID: item.ApprovalID, OperationID: item.OperationID, ErrorCode: item.ErrorCode,
+			BeforeState: item.BeforeState, AfterState: item.AfterState, RequestID: item.RequestID,
+		})
+		if prepareErr != nil {
+			return Page{}, ErrIntegrity
+		}
+		item.BeforeState = prepared.BeforeState
+		item.AfterState = prepared.AfterState
+		item.CreatedAt = item.CreatedAt.UTC().Truncate(time.Microsecond)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return Page{}, errors.New("administrator audit events could not be read")
+	}
+
+	page := Page{Items: items}
+	if len(items) > query.Limit {
+		page.Items = items[:query.Limit]
+		last := page.Items[len(page.Items)-1]
+		cursor := EncodeCursor(last.CreatedAt, last.ID)
+		page.NextCursor = &cursor
+	}
+	return page, nil
 }
 
 func lockAuditChain(ctx context.Context, tx pgx.Tx) error {

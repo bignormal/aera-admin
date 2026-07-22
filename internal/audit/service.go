@@ -56,6 +56,16 @@ func (service *Service) Append(ctx context.Context, record Record) (uuid.UUID, e
 	return id, nil
 }
 
+func (service *Service) List(ctx context.Context, query Query) (Page, error) {
+	if err := query.Validate(); err != nil {
+		return Page{}, err
+	}
+	if service == nil || service.postgres == nil {
+		return Page{}, errors.New("administrator audit service is unavailable")
+	}
+	return listAuditEvents(ctx, service.postgres, query)
+}
+
 func (service *Service) AppendTx(ctx context.Context, tx pgx.Tx, record Record) (uuid.UUID, error) {
 	prepared, err := prepareRecord(record)
 	if err != nil {
