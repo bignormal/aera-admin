@@ -40,6 +40,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 		"admin_audit_events",
 		"admin_audit_checkpoints",
 		"reason_codes",
+		"admin_security_settings",
+		"admin_settings_idempotency",
 	} {
 		assertTableExists(t, ctx, postgres, table)
 	}
@@ -59,8 +61,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 5 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 5/32", migrationCount, checksumLength)
+	if migrationCount != 6 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 6/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int
@@ -69,6 +71,62 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	}
 	if reasonCodeCount < 8 {
 		t.Fatalf("active seeded reason codes = %d, want at least 8", reasonCodeCount)
+	}
+	var idleMinutes, absoluteHours, retentionDays int
+	var settingsRevision int64
+	if err := postgres.QueryRow(ctx, `
+		SELECT session_idle_minutes, session_absolute_hours, audit_retention_days, revision
+		FROM admin_security_settings
+		WHERE settings_key = 'global'
+	`).Scan(&idleMinutes, &absoluteHours, &retentionDays, &settingsRevision); err != nil {
+		t.Fatalf("read seeded administrator security settings: %v", err)
+	}
+	if idleMinutes != 30 || absoluteHours != 8 || retentionDays != 730 || settingsRevision != 1 {
+		t.Fatalf("seeded security policy = %d/%d/%d r%d, want 30/8/730 r1", idleMinutes, absoluteHours, retentionDays, settingsRevision)
+	}
+	var protectedReasonCount int
+	if err := postgres.QueryRow(ctx, `
+		SELECT count(*)
+		FROM reason_codes
+		WHERE code IN ('security_policy_change', 'reason_catalog_change')
+		  AND category = 'security' AND active AND revision = 1
+	`).Scan(&protectedReasonCount); err != nil {
+		t.Fatalf("read protected settings reasons: %v", err)
+	}
+	if protectedReasonCount != 2 {
+		t.Fatalf("protected settings reason count = %d, want 2", protectedReasonCount)
+	}
+	if _, err := postgres.Exec(ctx, `UPDATE reason_codes SET code = 'renamed_reason' WHERE code = 'session_cleanup'`); err == nil {
+		t.Fatal("reason code update unexpectedly succeeded")
+	}
+	if _, err := postgres.Exec(ctx, `UPDATE reason_codes SET category = 'account' WHERE code = 'session_cleanup'`); err == nil {
+		t.Fatal("reason category update unexpectedly succeeded")
+	}
+	assertUniqueColumns(t, ctx, postgres, "admin_settings_idempotency", "admin_settings_idempotency_actor_key", []string{
+		"actor_admin_id", "action", "idempotency_key_hmac",
+	})
+	assertIndexExists(t, ctx, postgres, "admin_audit_events_event_created_idx")
+	assertIndexExists(t, ctx, postgres, "admin_audit_events_outcome_created_idx")
+	assertIndexExists(t, ctx, postgres, "admin_audit_events_reason_created_idx")
+
+	settingsActorID := uuid.New()
+	seedActiveAdministrator(t, ctx, postgres, settingsActorID, rbac.SuperAdmin)
+	keyHMAC := bytes.Repeat([]byte{3}, 32)
+	requestHash := bytes.Repeat([]byte{4}, 32)
+	insertSettingsIdempotency := func(operationID uuid.UUID) error {
+		_, err := postgres.Exec(ctx, `
+			INSERT INTO admin_settings_idempotency (
+				operation_id, actor_admin_id, action, idempotency_key_hmac, request_hash,
+				response_status, response_body, created_at, expires_at
+			) VALUES ($1, $2, 'update_security_policy', $3, $4, 200, '{"revision":2}', now(), now() + interval '24 hours')
+		`, operationID, settingsActorID, keyHMAC, requestHash)
+		return err
+	}
+	if err := insertSettingsIdempotency(uuid.New()); err != nil {
+		t.Fatalf("insert settings idempotency record: %v", err)
+	}
+	if err := insertSettingsIdempotency(uuid.New()); err == nil {
+		t.Fatal("duplicate settings idempotency key unexpectedly succeeded")
 	}
 	assertColumnType(t, ctx, postgres, "admin_invitations", "totp_ciphertext", "bytea")
 
@@ -330,5 +388,22 @@ func assertColumnType(t *testing.T, ctx context.Context, postgres *pgxpool.Pool,
 	}
 	if got != want {
 		t.Errorf("column type %s.%s = %q, want %q", table, column, got, want)
+	}
+}
+
+func assertIndexExists(t *testing.T, ctx context.Context, postgres *pgxpool.Pool, index string) {
+	t.Helper()
+	var exists bool
+	if err := postgres.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_indexes
+			WHERE schemaname = current_schema() AND indexname = $1
+		)
+	`, index).Scan(&exists); err != nil {
+		t.Fatalf("check index %s: %v", index, err)
+	}
+	if !exists {
+		t.Errorf("index %s does not exist", index)
 	}
 }

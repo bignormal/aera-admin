@@ -27,6 +27,8 @@ const (
 	ReadFullAudit            Permission = "audit.read_full"
 	ReadOwnAudit             Permission = "audit.read_own"
 	ReadServiceHealth        Permission = "service_health.read"
+	ReadSystemSettings       Permission = "system_settings.read"
+	ManageSystemSettings     Permission = "system_settings.manage"
 )
 
 var fixedRoles = []Role{
@@ -51,6 +53,8 @@ var fixedPermissions = map[Role][]Permission{
 		ApproveAccountLifecycle,
 		ReadFullAudit,
 		ReadServiceHealth,
+		ReadSystemSettings,
+		ManageSystemSettings,
 	},
 	Developer: {
 		ReadTechnicalUserFields,
@@ -80,6 +84,7 @@ var fixedPermissions = map[Role][]Permission{
 		ReadAdministrators,
 		ReadFullAudit,
 		ReadServiceHealth,
+		ReadSystemSettings,
 	},
 }
 

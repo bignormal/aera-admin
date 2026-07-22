@@ -23,6 +23,14 @@ func TestFixedMatrix(t *testing.T) {
 		{Finance, ReadServiceHealth, false},
 		{Developer, ReadTechnicalUserFields, true},
 		{SuperAdmin, InitiateAccountLifecycle, false},
+		{SuperAdmin, ReadSystemSettings, true},
+		{SuperAdmin, ManageSystemSettings, true},
+		{Auditor, ReadSystemSettings, true},
+		{Auditor, ManageSystemSettings, false},
+		{Developer, ReadSystemSettings, false},
+		{Operator, ReadSystemSettings, false},
+		{Support, ReadSystemSettings, false},
+		{Finance, ReadSystemSettings, false},
 	}
 
 	for _, test := range tests {
