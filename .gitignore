@@ -1,0 +1,75 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+/.idea/*
+!/.idea/runConfigurations
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/.next-soybean-e2e/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+.env
+!admin-web/.env
+
+*.db
+*.db-shm
+*.db-wal
+*.bak
+
+/media
+/.tmp/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Local visual brainstorming previews
+/.superpowers/
+
+# Codex isolated implementation worktrees
+/.worktrees/
+
+# 本地开发 PKI（scripts/dev-pki.sh 生成，含私钥）
+deploy/dev-pki/
+/.tmp-admin-pki/
+/.tmp-admin-*.sh
+
+# Local browser/debug artifacts
+/.playwright-cli/
+
+# Local build outputs
+/bin/
