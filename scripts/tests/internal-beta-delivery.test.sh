@@ -62,4 +62,184 @@ AERA_ADMIN_ENV_FILE=/dev/null \
   docker compose -f deploy/compose.internal-beta.yaml config >/dev/null
 
 node --test scripts/tests/gateway.test.mjs
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/aera-admin-internal-beta.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/bin" "$tmp/evidence" "$tmp/pki" "$tmp/state"
+command_log="$tmp/commands.log"
+export AERA_ADMIN_DELIVERY_TEST_LOG="$command_log"
+
+for pki_file in ca.pem client.pem client-key.pem service-key.pem; do
+  : >"$tmp/pki/$pki_file"
+done
+printf 'services: {}\n' >"$tmp/compose.yaml"
+printf 'fixture only\n' >"$tmp/admin.env"
+
+digest() {
+  local character=$1
+  printf 'sha256:'
+  for _ in {1..64}; do
+    printf '%s' "$character"
+  done
+}
+
+manifest() {
+  local path=$1
+  local sha=$2
+  local cloud_sha=$3
+  local image_digest=$4
+  jq -cnS \
+    --arg sha "$sha" \
+    --arg cloud "$cloud_sha" \
+    --arg digest "$image_digest" \
+    --arg reference "ghcr.io/bignormal/aera-admin@$image_digest" '
+      {
+        schemaVersion: 1,
+        repository: "bignormal/aera-admin",
+        commitSha: $sha,
+        image: {reference: $reference, digest: $digest},
+        compatibility: {
+          cloudCommitSha: $cloud,
+          cloudInternalApiVersion: "v1",
+          cloudSchemaMinimum: 17,
+          cloudSchemaMaximum: 20
+        },
+        mutationsEnabledByDefault: false
+      }
+    ' >"$path"
+  printf '\n' >>"$path"
+}
+
+cat >"$tmp/bin/verify" <<'SH'
+#!/bin/sh
+set -eu
+manifest=$1
+test "$(jq -r '.commitSha' "$manifest")" = "$AERA_RELEASE_EXPECTED_SHA"
+test "$(jq -r '.compatibility.cloudCommitSha' "$manifest")" = \
+  "$AERA_RELEASE_EXPECTED_CLOUD_SHA"
+printf 'verify %s\n' "$(jq -r '.image.digest' "$manifest")" \
+  >>"$AERA_ADMIN_DELIVERY_TEST_LOG"
+SH
+
+cat >"$tmp/bin/docker" <<'SH'
+#!/bin/sh
+set -eu
+printf 'docker image=%s %s\n' "${AGENTERA_ADMIN_IMAGE_DIGEST:-none}" "$*" \
+  >>"$AERA_ADMIN_DELIVERY_TEST_LOG"
+if test "${1:-}" = compose; then
+  case " $* " in
+    *" up "*)
+      printf '%s\n' "$AGENTERA_ADMIN_IMAGE_DIGEST" \
+        >"$AERA_INTERNAL_BETA_ADMIN_STATE_DIR/test-running-image"
+      ;;
+  esac
+fi
+SH
+
+cat >"$tmp/bin/health" <<'SH'
+#!/bin/sh
+set -eu
+running=$(cat "$AERA_INTERNAL_BETA_ADMIN_STATE_DIR/test-running-image")
+printf 'health %s\n' "$running" >>"$AERA_ADMIN_DELIVERY_TEST_LOG"
+test "${AERA_ADMIN_DELIVERY_FAIL_IMAGE:-}" != "$running"
+SH
+
+cat >"$tmp/bin/exposure" <<'SH'
+#!/bin/sh
+set -eu
+printf 'exposure\n' >>"$AERA_ADMIN_DELIVERY_TEST_LOG"
+SH
+
+cat >"$tmp/bin/ss" <<'SH'
+#!/bin/sh
+set -eu
+printf 'LISTEN 0 128 %s:%s 0.0.0.0:*\n' \
+  "${AERA_ADMIN_TEST_LISTENER:-127.0.0.1}" \
+  "${AERA_ADMIN_PRIVATE_PORT:-19090}"
+SH
+
+cat >"$tmp/bin/curl" <<'SH'
+#!/bin/sh
+set -eu
+printf '404'
+SH
+
+chmod +x "$tmp/bin/"*
+export PATH="$tmp/bin:$PATH"
+export AERA_ADMIN_ENV_FILE="$tmp/admin.env"
+export AERA_ADMIN_PKI_DIR="$tmp/pki"
+export AERA_INTERNAL_BETA_ADMIN_STATE_DIR="$tmp/state"
+export AERA_INTERNAL_BETA_ADMIN_COMPOSE_FILE="$tmp/compose.yaml"
+export AERA_INTERNAL_BETA_ADMIN_COMPOSE_PROJECT=aera-admin-delivery-test
+export AERA_INTERNAL_BETA_ADMIN_VERIFY_COMMAND="$tmp/bin/verify"
+export AERA_INTERNAL_BETA_ADMIN_HEALTH_COMMAND="$tmp/bin/health"
+export AERA_INTERNAL_BETA_ADMIN_EXPOSURE_COMMAND="$tmp/bin/exposure"
+
+sha_a=$(printf 'a%.0s' {1..40})
+sha_b=$(printf 'b%.0s' {1..40})
+cloud_sha=$(printf 'c%.0s' {1..40})
+digest_a=$(digest a)
+digest_b=$(digest b)
+reference_a="ghcr.io/bignormal/aera-admin@$digest_a"
+reference_b="ghcr.io/bignormal/aera-admin@$digest_b"
+manifest "$tmp/evidence/a.json" "$sha_a" "$cloud_sha" "$digest_a"
+manifest "$tmp/evidence/b.json" "$sha_b" "$cloud_sha" "$digest_b"
+
+export AERA_INTERNAL_BETA_ADMIN_EXPECTED_SHA="$sha_a"
+export AERA_INTERNAL_BETA_ADMIN_EXPECTED_CLOUD_SHA="$cloud_sha"
+deploy/internal-beta/deploy.sh deploy "$tmp/evidence/a.json"
+jq -e --arg digest "$digest_a" '
+  .environment == "internal_beta" and
+  .privateAccess == "ssh_loopback" and
+  .mutationsEnabled == false and
+  .current.imageDigest == $digest and
+  .previous == null
+' "$tmp/state/deployment-state.json" >/dev/null
+
+export AERA_INTERNAL_BETA_ADMIN_EXPECTED_SHA="$sha_b"
+export AERA_ADMIN_DELIVERY_FAIL_IMAGE="$reference_b"
+if deploy/internal-beta/deploy.sh deploy "$tmp/evidence/b.json" \
+  >"$tmp/failed-deploy.out" 2>"$tmp/failed-deploy.err"; then
+  fail 'failed candidate unexpectedly deployed'
+fi
+unset AERA_ADMIN_DELIVERY_FAIL_IMAGE
+jq -e --arg digest "$digest_a" \
+  '.current.imageDigest == $digest and .previous == null' \
+  "$tmp/state/deployment-state.json" >/dev/null
+test "$(cat "$tmp/state/test-running-image")" = "$reference_a" ||
+  fail 'failed update did not restore the recorded Admin digest'
+
+deploy/internal-beta/deploy.sh deploy "$tmp/evidence/b.json"
+jq -e --arg current "$digest_b" --arg previous "$digest_a" '
+  .current.imageDigest == $current and
+  .previous.imageDigest == $previous and
+  .mutationsEnabled == false
+' "$tmp/state/deployment-state.json" >/dev/null
+deploy/internal-beta/deploy.sh rollback
+jq -e --arg current "$digest_a" --arg previous "$digest_b" '
+  .current.imageDigest == $current and
+  .previous.imageDigest == $previous and
+  .mutationsEnabled == false
+' "$tmp/state/deployment-state.json" >/dev/null
+if deploy/internal-beta/deploy.sh rollback "$tmp/evidence/a.json" \
+  >"$tmp/rollback-argument.out" 2>"$tmp/rollback-argument.err"; then
+  fail 'rollback accepted caller-supplied candidate input'
+fi
+
+# Execute the real exposure checker against deterministic local command
+# fixtures. It must accept loopback-only publication and reject wildcard
+# listeners without probing any real host.
+export AERA_INTERNAL_BETA_PUBLIC_ORIGIN=
+export AERA_ADMIN_PRIVATE_PORT=19090
+deploy/internal-beta/exposure-check.sh
+export AERA_ADMIN_TEST_LISTENER=0.0.0.0
+if deploy/internal-beta/exposure-check.sh \
+  >"$tmp/exposure.out" 2>"$tmp/exposure.err"; then
+  fail 'exposure checker accepted a wildcard Admin listener'
+fi
+unset AERA_ADMIN_TEST_LISTENER
+
+grep -q "^verify $digest_a$" "$command_log"
+grep -q "^verify $digest_b$" "$command_log"
+grep -q '^exposure$' "$command_log"
 printf 'internal beta Admin delivery tests passed\n'
