@@ -1,0 +1,223 @@
+name: Admin candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact verified Admin commit SHA
+        required: true
+      ci_run_id:
+        description: Successful Admin CI run ID for source_sha
+        required: true
+      cloud_source_sha:
+        description: Exact verified compatible Cloud candidate commit SHA
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  packages: write
+
+concurrency:
+  group: admin-candidate-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+
+jobs:
+  candidate:
+    name: Verify once and build immutable Admin image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+
+      - name: Verify exact successful CI and release identities
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          CLOUD_SOURCE_SHA: ${{ inputs.cloud_source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CLOUD_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_WORKFLOW_REF" = \
+            "$GITHUB_REPOSITORY/.github/workflows/candidate.yml@refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1)"
+          gh run view "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json conclusion,headSha,jobs,url,workflowName \
+            > "$RUNNER_TEMP/ci-run.json"
+          jq -e \
+            --arg sha "$EXPECTED_SHA" '
+              .conclusion == "success" and
+              .headSha == $sha and
+              .workflowName == "CI" and
+              ([.jobs[] | select(.conclusion != "success")] | length) == 0 and
+              ([.jobs[].name] | index("quality") != null) and
+              ([.jobs[].name] | index("browser") != null)
+            ' "$RUNNER_TEMP/ci-run.json" >/dev/null
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.34.5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            admin-web/pnpm-lock.yaml
+
+      - name: Install exact dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir admin-web install --frozen-lockfile
+
+      - name: Run candidate and application verification
+        run: |
+          bash scripts/tests/candidate-contract.test.sh
+          bash scripts/tests/internal-beta-delivery.test.sh
+          pnpm lint
+          pnpm test:int
+          pnpm --dir admin-web typecheck
+          pnpm --dir admin-web test
+          pnpm run build:platform
+          docker build --pull --tag aera-admin:candidate-check .
+
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" |
+            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push image once
+        id: image
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/admin-candidate"
+          mkdir -p "$evidence"
+          docker buildx build \
+            --platform linux/amd64 \
+            --pull \
+            --provenance=false \
+            --tag "$IMAGE_REPOSITORY:$SOURCE_SHA" \
+            --push \
+            --metadata-file "$evidence/build-metadata.json" \
+            .
+          digest=$(jq -r '."containerimage.digest"' "$evidence/build-metadata.json")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "reference=$IMAGE_REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.5
+          cache: false
+
+      - name: Install exact supply-chain tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_bin="$RUNNER_TEMP/release-tools"
+          mkdir -p "$tool_bin"
+          GOBIN="$tool_bin" go install github.com/sigstore/cosign/v3/cmd/cosign@v3.0.6
+          GOBIN="$tool_bin" go install github.com/anchore/syft/cmd/syft@v1.44.0
+          echo "$tool_bin" >> "$GITHUB_PATH"
+
+      - name: Sign image and attest reviewed SLSA v1 provenance
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.image.outputs.reference }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/admin-candidate"
+          workflow_locator=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY/"}
+          workflow_path=${workflow_locator%@*}
+          workflow_ref=${workflow_locator#*@}
+          test "$workflow_path" = ".github/workflows/candidate.yml"
+          test "$workflow_ref" = "$GITHUB_REF"
+
+          syft "$IMAGE_REFERENCE" -o spdx-json="$evidence/sbom.spdx.json"
+          export AERA_PROVENANCE_REPOSITORY="$GITHUB_REPOSITORY"
+          export AERA_PROVENANCE_SOURCE_SHA="$SOURCE_SHA"
+          export AERA_PROVENANCE_WORKFLOW_PATH="$workflow_path"
+          export AERA_PROVENANCE_WORKFLOW_REF="$workflow_ref"
+          export AERA_PROVENANCE_RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          export AERA_PROVENANCE_BUILDER_ID="https://github.com/$GITHUB_WORKFLOW_REF"
+          export AERA_PROVENANCE_IMAGE_REFERENCE="$IMAGE_REFERENCE"
+          export AERA_PROVENANCE_IMAGE_DIGEST="$IMAGE_DIGEST"
+          scripts/release/build-provenance.sh "$evidence/provenance.json"
+
+          cosign sign --yes --use-signing-config=false \
+            --bundle "$evidence/image.sigstore.json" "$IMAGE_REFERENCE"
+          cosign attest --yes --use-signing-config=false \
+            --type slsaprovenance1 \
+            --predicate "$evidence/provenance.json" \
+            --bundle "$evidence/provenance.sigstore.json" "$IMAGE_REFERENCE"
+
+      - name: Build, verify, and sign canonical Admin candidate manifest
+        shell: bash
+        env:
+          AERA_RELEASE_REPOSITORY: ${{ github.repository }}
+          AERA_RELEASE_COMMIT_SHA: ${{ inputs.source_sha }}
+          AERA_RELEASE_IMAGE: ${{ env.IMAGE_REPOSITORY }}
+          AERA_RELEASE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          AERA_RELEASE_WORKFLOW: ${{ github.workflow }}
+          AERA_RELEASE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          AERA_RELEASE_ADMIN_SCHEMA_MIN: "1"
+          AERA_RELEASE_ADMIN_SCHEMA_MAX: "1"
+          AERA_RELEASE_ADMIN_HIGHEST_MIGRATION: "1"
+          AERA_RELEASE_CLOUD_COMMIT_SHA: ${{ inputs.cloud_source_sha }}
+          AERA_RELEASE_CLOUD_SCHEMA_MIN: "17"
+          AERA_RELEASE_CLOUD_SCHEMA_MAX: "20"
+          AERA_RELEASE_EXPECTED_SHA: ${{ inputs.source_sha }}
+          AERA_RELEASE_EXPECTED_CLOUD_SHA: ${{ inputs.cloud_source_sha }}
+          AERA_RELEASE_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/admin-candidate"
+          export AERA_RELEASE_CERTIFICATE_IDENTITY_REGEXP="^https://github\\.com/bignormal/aera-admin/\\.github/workflows/candidate\\.yml@${GITHUB_REF}$"
+          export AERA_RELEASE_SBOM_DIGEST="sha256:$(sha256sum "$evidence/sbom.spdx.json" | cut -d' ' -f1)"
+          export AERA_RELEASE_PROVENANCE_DIGEST="sha256:$(sha256sum "$evidence/provenance.json" | cut -d' ' -f1)"
+          export AERA_RELEASE_CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          scripts/release/build-manifest.sh "$evidence/manifest.json"
+          cosign sign-blob --yes \
+            --bundle "$evidence/manifest.sigstore.json" "$evidence/manifest.json"
+          scripts/release/verify-manifest.sh "$evidence/manifest.json"
+          (
+            cd "$evidence"
+            sha256sum \
+              image.sigstore.json \
+              manifest.json \
+              manifest.sigstore.json \
+              provenance.json \
+              provenance.sigstore.json \
+              sbom.spdx.json > SHA256SUMS
+          )
+
+      - name: Upload immutable candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-candidate-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/admin-candidate
+          if-no-files-found: error
+          retention-days: 30

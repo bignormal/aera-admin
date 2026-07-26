@@ -1,0 +1,16 @@
+.git
+.github
+.next
+.tmp
+admin-web/dist
+admin-web/node_modules
+agentera-admin.db
+agentera-admin.db-shm
+agentera-admin.db-wal
+deploy/dev-pki
+docs
+node_modules
+playwright-report
+test-results
+tests
+*.log

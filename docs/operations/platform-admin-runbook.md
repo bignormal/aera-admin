@@ -91,6 +91,10 @@ pnpm run test:e2e:live:platform
 
 每次发布记录代码 SHA、数据库备份位置、验证结果和回滚点。未实际部署时不得把本地验证记为生产切换完成。
 
+公司内部 Beta 的签名候选、私有回环部署、公开暴露面检查和按 digest 回滚使用
+`docs/operations/internal-beta-delivery.md`；不得把本节的公网 Nginx 示例直接
+用于内部 Beta，也不得把本地 `pnpm run build:platform` 当成签名候选。
+
 ## aera-cloud 内部管理上游（云用户 / 官方 Agent）
 
 后台通过 Payload BFF 的 `/api/cloud/v1/:operation` 调用 aera-cloud 的 `/internal/admin/v1/*`：

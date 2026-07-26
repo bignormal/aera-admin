@@ -9,3 +9,9 @@
 5. 运行 `nginx -t` 后再平滑重载。
 
 生产环境不要公开 Payload 原生 `/admin`。详细备份、验证与回滚步骤见 `docs/operations/platform-admin-runbook.md`。
+
+公司内部 Beta 不使用上面的公网 Nginx 拓扑。它只接受
+`Admin candidate` 工作流签出的不可变 GHCR digest，并通过
+`deploy/compose.internal-beta.yaml` 把 Soybean 网关绑定到主机回环地址；
+Payload 仍只在 Docker 私有网络。完整候选、校验、SSH 隧道和回滚步骤见
+`docs/operations/internal-beta-delivery.md`。

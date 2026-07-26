@@ -1,0 +1,89 @@
+name: aera-admin-internal-beta
+
+services:
+  payload:
+    image: ${AGENTERA_ADMIN_IMAGE_DIGEST:?set the verified Admin GHCR image@sha256 digest}
+    restart: unless-stopped
+    env_file:
+      - path: ${AERA_ADMIN_ENV_FILE:?set the owner-only Admin secret environment file}
+        required: true
+    environment:
+      ADMIN_WEB_URL: http://127.0.0.1:${AERA_ADMIN_PRIVATE_PORT:-19090}
+      DATABASE_URL: file:/data/agentera-admin.db
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_SERVER_URL: http://127.0.0.1:${AERA_ADMIN_PRIVATE_PORT:-19090}
+      PORT: "3000"
+      AGENTERA_CLOUD_ADMIN_CA_FILE: /run/aera-admin-pki/ca.pem
+      AGENTERA_CLOUD_ADMIN_CLIENT_CERT_FILE: /run/aera-admin-pki/client.pem
+      AGENTERA_CLOUD_ADMIN_CLIENT_KEY_FILE: /run/aera-admin-pki/client-key.pem
+      AGENTERA_CLOUD_ADMIN_JWT_SIGNING_KEY_FILE: /run/aera-admin-pki/service-key.pem
+    volumes:
+      - aera-admin-data-internal-beta:/data
+      - aera-admin-media-internal-beta:/app/public/media
+      - ${AERA_ADMIN_PKI_DIR:?set the owner-only Admin-to-Cloud PKI directory}:/run/aera-admin-pki:ro
+    networks: [aera-admin-private, aera-admin-egress]
+    read_only: true
+    tmpfs:
+      - /app/.next/cache:rw,noexec,nosuid,size=64m,uid=1001,gid=1001
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1001,gid=1001
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: "0.75"
+    mem_limit: 1024m
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/admins/me').then(r=>{if(![200,401].includes(r.status))process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  gateway:
+    image: ${AGENTERA_ADMIN_IMAGE_DIGEST:?set the verified Admin GHCR image@sha256 digest}
+    command: ["node", "/app/admin-gateway.mjs"]
+    restart: unless-stopped
+    depends_on:
+      payload: {condition: service_healthy}
+    environment:
+      AERA_ADMIN_GATEWAY_HOST: 0.0.0.0
+      AERA_ADMIN_GATEWAY_PORT: "8080"
+      AERA_ADMIN_MUTATIONS_ENABLED: ${AERA_ADMIN_MUTATIONS_ENABLED:-false}
+      AERA_ADMIN_PAYLOAD_UPSTREAM: http://payload:3000
+      AERA_ADMIN_STATIC_ROOT: /app/admin-web-dist
+    ports:
+      - "127.0.0.1:${AERA_ADMIN_PRIVATE_PORT:-19090}:8080"
+    networks: [aera-admin-private]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,uid=1001,gid=1001"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: "0.25"
+    mem_limit: 192m
+    pids_limit: 96
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/health/ready').then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  aera-admin-private:
+    internal: true
+  aera-admin-egress:
+
+volumes:
+  aera-admin-data-internal-beta:
+  aera-admin-media-internal-beta:
