@@ -8,7 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     fileParallelism: false,
-    include: ['tests/live/**/*.live.spec.ts'],
+    include: ['tests/live/platform-read.live.spec.ts'],
     pool: 'forks',
     sequence: { concurrent: false },
   },

@@ -39,7 +39,7 @@ test('logs in with Payload and renders the Soybean shell', async ({ page }) => {
   await expect(page.getByTestId('agentera-brand')).toContainText('AgentEra 管理系统')
   await expect(page.getByTestId('agentera-admin-shell')).toBeVisible()
   await expect(page.getByText('AgentEra API / 充值业务', { exact: true })).toBeVisible()
-  await expect(page.getByText('未配置', { exact: true })).toBeVisible()
+  await expect(page.getByText('未配置', { exact: true })).toHaveCount(2)
   expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull()
 })
 

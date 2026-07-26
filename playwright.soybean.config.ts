@@ -6,6 +6,11 @@ process.env.DATABASE_URL ||= `file:./.tmp/soybean-e2e-${process.pid}.db`;
 process.env.PAYLOAD_SECRET ||= 'agentera-soybean-e2e-secret';
 process.env.NEXT_PUBLIC_SERVER_URL ||= 'http://127.0.0.1:3101';
 process.env.ADMIN_WEB_URL ||= 'http://127.0.0.1:9527';
+// This suite proves deterministic fail-closed and mocked BFF behavior. Real
+// Aera API and Cloud transport checks live in the explicit live-test configs.
+process.env.AGENTERA_API_URL = '';
+process.env.AGENTERA_API_ADMIN_KEY = '';
+process.env.AGENTERA_CLOUD_ADMIN_BASE_URL = '';
 
 export default defineConfig({
   testDir: './tests/e2e-soybean',

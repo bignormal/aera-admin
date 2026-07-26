@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  DATABASE_URL: file:./.tmp/ci.db
+  PAYLOAD_SECRET: aera-admin-ci-only-secret
+  NEXT_PUBLIC_SERVER_URL: http://127.0.0.1:3100
+  ADMIN_WEB_URL: http://127.0.0.1:9527
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            admin-web/pnpm-lock.yaml
+      - name: Install Payload dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Admin Web dependencies
+        run: pnpm --dir admin-web install --frozen-lockfile
+      - name: Lint Payload
+        run: pnpm lint
+      - name: Test Payload integration contracts
+        run: pnpm test:int
+      - name: Build Payload
+        run: pnpm build
+      - name: Typecheck Admin Web
+        run: pnpm --dir admin-web typecheck
+      - name: Test Admin Web
+        run: pnpm --dir admin-web test
+      - name: Build Admin Web
+        run: pnpm --dir admin-web build
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            admin-web/pnpm-lock.yaml
+      - name: Install Payload dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Admin Web dependencies
+        run: pnpm --dir admin-web install --frozen-lockfile
+      - name: Install Chrome
+        run: pnpm exec playwright install --with-deps chrome
+      - name: Test Payload browser workflows
+        run: pnpm test:e2e
+      - name: Test Admin Web browser workflows
+        run: pnpm test:e2e:admin

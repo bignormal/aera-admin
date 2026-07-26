@@ -25,6 +25,7 @@
     "test:e2e:admin": "cross-env NODE_OPTIONS=\"--no-deprecation --import=tsx/esm\" playwright test --config=playwright.soybean.config.ts",
     "test:e2e:live:platform": "cross-env NODE_OPTIONS=--no-deprecation playwright test --config=playwright.platform-live.config.ts",
     "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.config.mts",
+    "test:live:cloud": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.cloud-live.config.mts",
     "test:live:platform": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config ./vitest.live.config.mts"
   },
   "dependencies": {
