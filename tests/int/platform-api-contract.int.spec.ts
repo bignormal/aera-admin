@@ -9,9 +9,11 @@ const upstreamRoot = ['../aera-api', '../agentera-claw-api']
   .map((dir) => resolve(process.cwd(), dir))
   .find((dir) => existsSync(`${dir}/backend/internal/server/routes/admin.go`))
 
-const routeFiles = ['admin.go', 'payment.go'].map((file) =>
-  resolve(`${upstreamRoot}/backend/internal/server/routes/${file}`),
-)
+const routeFiles = upstreamRoot
+  ? ['admin.go', 'payment.go'].map((file) =>
+      resolve(upstreamRoot, 'backend/internal/server/routes', file),
+    )
+  : []
 
 type RouteSignature = `${'DELETE' | 'GET' | 'POST' | 'PUT'} ${string}`
 
@@ -44,7 +46,7 @@ function registeredAdminRoutes(source: string): Set<RouteSignature> {
 }
 
 describe('AgentEra API operation registry contract', () => {
-  it('maps every allowlisted BFF operation to an existing Go admin route', () => {
+  it.skipIf(!upstreamRoot)('maps every allowlisted BFF operation to an existing Go admin route', () => {
     const registered = new Set(
       routeFiles.flatMap((file) => [...registeredAdminRoutes(readFileSync(file, 'utf8'))]),
     )
