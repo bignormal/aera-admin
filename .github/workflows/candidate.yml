@@ -25,6 +25,11 @@ concurrency:
 
 env:
   IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+  CI: true
+  DATABASE_URL: file:./.tmp/candidate.db
+  PAYLOAD_SECRET: aera-admin-candidate-ci-only-secret
+  NEXT_PUBLIC_SERVER_URL: http://127.0.0.1:3100
+  ADMIN_WEB_URL: http://127.0.0.1:9527
 
 jobs:
   candidate:
