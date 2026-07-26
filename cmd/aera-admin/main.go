@@ -22,6 +22,7 @@ import (
 	"github.com/bignormal/aera-admin/internal/httpapi"
 	"github.com/bignormal/aera-admin/internal/officialagent"
 	"github.com/bignormal/aera-admin/internal/operations"
+	"github.com/bignormal/aera-admin/internal/rbacadmin"
 	"github.com/bignormal/aera-admin/internal/secure"
 	adminsettings "github.com/bignormal/aera-admin/internal/settings"
 	"github.com/bignormal/aera-admin/internal/store"
@@ -70,7 +71,7 @@ func run(ctx context.Context, lookup config.LookupEnv) error {
 		return err
 	}
 	defer func() { _ = redisStore.Close() }()
-	runtime, err := buildAdminRuntime(settings, postgres, redisStore.Client())
+	runtime, err := buildAdminRuntime(ctx, settings, postgres, redisStore.Client())
 	if err != nil {
 		return err
 	}
@@ -130,7 +131,7 @@ type adminRuntime struct {
 	Worker *operations.Worker
 }
 
-func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClient *redis.Client) (adminRuntime, error) {
+func buildAdminRuntime(ctx context.Context, settings config.Config, postgres *pgxpool.Pool, redisClient *redis.Client) (adminRuntime, error) {
 	passwords, err := secure.DefaultPasswordHasher()
 	if err != nil {
 		return adminRuntime{}, err
@@ -186,6 +187,18 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 		return adminRuntime{}, err
 	}
 	settingsHandler := adminsettings.NewHandler(settingsService)
+	roleStore, err := rbacadmin.NewStore(postgres)
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	roleService, err := rbacadmin.NewService(rbacadmin.ServiceConfig{Store: roleStore, Audit: auditService, Clock: time.Now})
+	if err != nil {
+		return adminRuntime{}, err
+	}
+	if err := roleService.Refresh(ctx); err != nil {
+		return adminRuntime{}, err
+	}
+	roleHandler := rbacadmin.NewHandler(roleService)
 	cloudClient, err := cloudadmin.NewHTTPClient(settings.CloudAdmin, time.Now)
 	if err != nil {
 		return adminRuntime{}, err
@@ -254,7 +267,7 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 	auditHandler := audithttp.NewHandler(auditService)
 	cloudHandler := cloudcontrol.NewHandler(cloudService)
 	officialHandler := officialagent.NewHandler(officialService)
-	router := newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler, officialHandler)
+	router := newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler, officialHandler, roleHandler)
 	browserSecurity, err := adminauth.NewBrowserSecurity(adminauth.BrowserSecurityConfig{
 		Service: authService, PublicURL: settings.PublicURL, SourceIPHMACKey: settings.SessionHMACKey,
 		TrustedProxyCIDRs: settings.TrustedProxyCIDRs,
@@ -265,7 +278,7 @@ func buildAdminRuntime(settings config.Config, postgres *pgxpool.Pool, redisClie
 	return adminRuntime{API: browserSecurity.Wrap(router), Worker: worker}, nil
 }
 
-func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler, officialHandler http.Handler) *http.ServeMux {
+func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandler, settingsHandler, officialHandler, roleHandler http.Handler) *http.ServeMux {
 	router := http.NewServeMux()
 	for _, path := range []string{"/auth/login", "/auth/totp/verify", "/auth/step-up", "/auth/logout", "/me"} {
 		router.Handle(path, authHandler)
@@ -275,13 +288,17 @@ func newAdminRouter(authHandler, administratorHandler, cloudHandler, auditHandle
 	}
 	for _, path := range []string{
 		"/cloud-users", "/cloud-users/", "/cloud-devices/", "/cloud-sessions/",
-		"/approval-requests", "/approval-requests/", "/operations/", "/system/health",
+		"/cloud-stats", "/approval-requests", "/approval-requests/", "/operations/", "/system/health",
 	} {
 		router.Handle(path, cloudHandler)
 	}
+	router.Handle("/cloud-device-stats", cloudHandler)
 	router.Handle("/audit-events", auditHandler)
 	for _, path := range []string{"/system/settings", "/system/settings/", "/system/reason-codes", "/system/reason-codes/"} {
 		router.Handle(path, settingsHandler)
+	}
+	for _, path := range []string{"/rbac/permissions", "/rbac/roles", "/rbac/roles/"} {
+		router.Handle(path, roleHandler)
 	}
 	for _, path := range []string{
 		"/official-agents", "/official-agents/", "/official-agent-drafts", "/official-agent-drafts/",

@@ -152,6 +152,20 @@ func (stub *handlerStub) GetUser(context.Context, admin.Actor, uuid.UUID) (cloud
 	return maskedUser(), nil
 }
 
+func (stub *handlerStub) Stats(context.Context, admin.Actor) (cloudadmin.PlatformStats, error) {
+	return cloudadmin.PlatformStats{}, nil
+}
+
+func (stub *handlerStub) UserMemberships(context.Context, admin.Actor, uuid.UUID) (cloudadmin.UserMemberships, error) {
+	return cloudadmin.UserMemberships{
+		Organizations: []cloudadmin.Membership{}, Workspaces: []cloudadmin.Membership{},
+	}, nil
+}
+
+func (stub *handlerStub) DeviceStats(context.Context, admin.Actor) (cloudadmin.DeviceStats, error) {
+	return cloudadmin.DeviceStats{Buckets: []cloudadmin.DeviceVersionStat{}}, nil
+}
+
 func (stub *handlerStub) ListDevices(context.Context, admin.Actor, uuid.UUID, cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.Device], error) {
 	return cloudadmin.Page[cloudadmin.Device]{Items: []cloudadmin.Device{}}, nil
 }
@@ -165,6 +179,14 @@ func (stub *handlerStub) RevokeDevice(context.Context, admin.Actor, uuid.UUID, i
 }
 
 func (stub *handlerStub) RevokeSession(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error) {
+	return operations.Result{OperationID: uuid.New(), State: operations.StateQueued, UpdatedAt: testNow()}, nil
+}
+
+func (stub *handlerStub) RevokeAllSessions(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error) {
+	return operations.Result{OperationID: uuid.New(), State: operations.StateQueued, UpdatedAt: testNow()}, nil
+}
+
+func (stub *handlerStub) ForcePasswordReset(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error) {
 	return operations.Result{OperationID: uuid.New(), State: operations.StateQueued, UpdatedAt: testNow()}, nil
 }
 

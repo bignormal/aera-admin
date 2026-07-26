@@ -12,5 +12,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // Ant Design's jsdom setup is CPU-heavy enough that parallel files can
+    // miss Testing Library's one-second query window on developer machines.
+    // Keep the default verification command deterministic.
+    fileParallelism: false,
   },
 });

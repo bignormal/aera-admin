@@ -37,10 +37,12 @@ var (
 type Action string
 
 const (
-	RevokeDevice  Action = "revoke_device"
-	RevokeSession Action = "revoke_session"
-	DisableUser   Action = "disable_user"
-	EnableUser    Action = "enable_user"
+	RevokeDevice       Action = "revoke_device"
+	RevokeSession      Action = "revoke_session"
+	RevokeAllSessions  Action = "revoke_all_sessions"
+	DisableUser        Action = "disable_user"
+	EnableUser         Action = "enable_user"
+	ForcePasswordReset Action = "force_password_reset"
 
 	OfficialDefinitionReserve  Action = "official_definition_reserve"
 	OfficialDraftCreate        Action = "official_draft_create"
@@ -133,7 +135,7 @@ func (action Action) Valid() bool {
 		OfficialDefinitionReserve, OfficialDraftCreate, OfficialDraftUpdate,
 		OfficialDraftSubmit, OfficialSubmissionWithdraw, OfficialSubmissionReview,
 		OfficialReleaseActivate, OfficialReleaseRollout, OfficialReleasePause,
-		OfficialReleaseResume, OfficialReleaseRollback:
+		OfficialReleaseResume, OfficialReleaseRollback, RevokeAllSessions, ForcePasswordReset:
 		return true
 	default:
 		return false
@@ -146,6 +148,10 @@ func permissionFor(action Action) rbac.Permission {
 		return rbac.RevokeCloudDevice
 	case RevokeSession:
 		return rbac.RevokeCloudSession
+	case RevokeAllSessions:
+		return rbac.RevokeCloudSession
+	case ForcePasswordReset:
+		return rbac.InitiateAccountLifecycle
 	case DisableUser, EnableUser:
 		return rbac.ApproveAccountLifecycle
 	case OfficialDefinitionReserve, OfficialDraftCreate, OfficialDraftUpdate,

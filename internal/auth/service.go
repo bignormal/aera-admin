@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bignormal/aera-admin/internal/audit"
+	"github.com/bignormal/aera-admin/internal/rbac"
 	"github.com/bignormal/aera-admin/internal/secure"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -298,6 +299,7 @@ func (service *Service) CompleteLogin(ctx context.Context, request CompleteLogin
 	reservationHandled = true
 	principal := Principal{
 		AdminID: administrator.ID.String(), SessionID: material.ID.String(), Role: administrator.Role,
+		Permissions:     rbac.Permissions(administrator.Role),
 		SecurityVersion: administrator.SecurityVersion, MFAAuthenticatedAt: now,
 		TOTPAuthenticatedAt: cloneOptionalTime(totpAuthenticatedAt), MFAMethod: mfaMethod,
 	}
@@ -375,6 +377,7 @@ func (service *Service) Authenticate(ctx context.Context, rawSessionToken string
 	session.IdleExpiresAt = idleExpiresAt
 	principal := Principal{
 		AdminID: session.AdminID.String(), SessionID: session.ID.String(), Role: session.Role,
+		Permissions:     rbac.Permissions(session.Role),
 		SecurityVersion: session.SecurityVersion, MFAAuthenticatedAt: session.MFAAuthenticatedAt,
 		TOTPAuthenticatedAt: cloneOptionalTime(session.TOTPAuthenticatedAt), MFAMethod: session.MFAMethod,
 	}

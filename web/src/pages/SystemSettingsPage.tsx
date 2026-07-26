@@ -143,8 +143,8 @@ export function SystemSettingsPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const role = auth.session?.administrator.role;
-  const canManage = Boolean(role && hasPermission(role, 'system_settings.manage'));
+  const granted = auth.session?.administrator.permissions;
+  const canManage = hasPermission(granted, 'system_settings.manage');
   const [policyDraftState, setPolicyDraftState] = useState<PolicyDraftState | null>(null);
   const [createDraft, setCreateDraft] = useState<CreateReasonDraft>(emptyCreateDraft);
   const [updateDraft, setUpdateDraft] = useState<UpdateReasonDraft>(emptyUpdateDraft);

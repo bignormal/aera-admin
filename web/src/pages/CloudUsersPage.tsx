@@ -21,8 +21,10 @@ import { z } from 'zod';
 
 import { APIError, postJSON, request } from '../api/client';
 import {
+  hasPermission,
   type ApprovalRequest,
   type CloudUser,
+  type CloudUserMemberships,
   type CloudUserStatus,
   type Page,
   type ReasonInput,
@@ -88,7 +90,8 @@ export function CloudUsersPage() {
   const [lifecyclePending, setLifecyclePending] = useState(false);
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const [pendingAfterStepUp, setPendingAfterStepUp] = useState<(() => Promise<ApprovalRequest>) | null>(null);
-  const role = auth.session?.administrator.role;
+  const granted = auth.session?.administrator.permissions;
+  const canInitiateLifecycle = hasPermission(granted, 'account_lifecycle.initiate');
 
   const users = useQuery({
     queryKey: ['cloud-users', status, cursor],
@@ -115,6 +118,13 @@ export function CloudUsersPage() {
   const detail = useQuery({
     queryKey: ['cloud-user', selectedUserID],
     queryFn: () => request<CloudUser>(`/cloud-users/${selectedUserID}`),
+    enabled: Boolean(selectedUserID),
+    retry: false,
+  });
+
+  const memberships = useQuery({
+    queryKey: ['cloud-user-memberships', selectedUserID],
+    queryFn: () => request<CloudUserMemberships>(`/cloud-users/${selectedUserID}/memberships`),
     enabled: Boolean(selectedUserID),
     retry: false,
   });
@@ -399,7 +409,33 @@ export function CloudUsersPage() {
               <dt>创建时间</dt><dd>{formatTime(detail.data.created_at)}</dd>
               <dt>最近 Cloud 活动</dt><dd>{formatTime(detail.data.last_cloud_activity_at)}</dd>
             </dl>
-            {role === 'operator' && currentLifecycle && (
+            <div className="detail-memberships">
+              <Typography.Text strong>所属组织</Typography.Text>
+              {memberships.isError ? (
+                <Typography.Text type="secondary">组织信息暂时不可用</Typography.Text>
+              ) : (memberships.data?.organizations.length ?? 0) === 0 ? (
+                <Typography.Text type="secondary">{memberships.isPending ? '加载中…' : '无'}</Typography.Text>
+              ) : (
+                <Space size={[8, 8]} wrap>
+                  {memberships.data?.organizations.map((item) => (
+                    <Tag key={item.id}>{item.display_name}（{item.role}）</Tag>
+                  ))}
+                </Space>
+              )}
+              <Typography.Text strong>所属工作区</Typography.Text>
+              {memberships.isError ? (
+                <Typography.Text type="secondary">工作区信息暂时不可用</Typography.Text>
+              ) : (memberships.data?.workspaces.length ?? 0) === 0 ? (
+                <Typography.Text type="secondary">{memberships.isPending ? '加载中…' : '无'}</Typography.Text>
+              ) : (
+                <Space size={[8, 8]} wrap>
+                  {memberships.data?.workspaces.map((item) => (
+                    <Tag key={item.id}>{item.display_name}（{item.role}）</Tag>
+                  ))}
+                </Space>
+              )}
+            </div>
+            {canInitiateLifecycle && currentLifecycle && (
               <Button
                 className="drawer-primary-action"
                 type="primary"

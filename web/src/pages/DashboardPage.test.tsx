@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { SessionDocument } from '../api/contracts';
+import { rolePermissions, type SessionDocument } from '../api/contracts';
 import { AuthProvider } from '../auth/AuthProvider';
 import { DashboardPage } from './DashboardPage';
 
@@ -89,6 +89,7 @@ function sessionForSuperAdmin(): SessionDocument {
       admin_id: '019f0000-0000-7000-8000-000000000081',
       session_id: '019f0000-0000-7000-8000-000000000082',
       role: 'super_admin',
+      permissions: [...(rolePermissions.super_admin ?? [])],
       security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z',

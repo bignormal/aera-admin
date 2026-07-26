@@ -40,7 +40,10 @@ func TestNewAdminRouterRegistersAuditSettingsAndOfficialAgentRoutes(t *testing.T
 	officialHandler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusCreated)
 	})
-	router := newAdminRouter(http.NotFoundHandler(), http.NotFoundHandler(), http.NotFoundHandler(), auditHandler, settingsHandler, officialHandler)
+	roleHandler := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	})
+	router := newAdminRouter(http.NotFoundHandler(), http.NotFoundHandler(), http.NotFoundHandler(), auditHandler, settingsHandler, officialHandler, roleHandler)
 	for path, expected := range map[string]int{
 		"/audit-events":                     http.StatusNoContent,
 		"/system/settings":                  http.StatusAccepted,
@@ -54,6 +57,8 @@ func TestNewAdminRouterRegistersAuditSettingsAndOfficialAgentRoutes(t *testing.T
 		"/official-agent-releases":          http.StatusCreated,
 		"/official-agent-rollback-requests": http.StatusCreated,
 		"/official-agent-audit-events":      http.StatusCreated,
+		"/rbac/permissions":                 http.StatusOK,
+		"/rbac/roles":                       http.StatusOK,
 	} {
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
@@ -96,7 +101,7 @@ func TestBuildAdminRuntimeWiresPublicAuthProtectedRoutesAndWorker(t *testing.T) 
 			}
 		}
 	})
-	runtime, err := buildAdminRuntime(settings, postgres, redisClient)
+	runtime, err := buildAdminRuntime(context.Background(), settings, postgres, redisClient)
 	if err != nil {
 		t.Fatalf("buildAdminRuntime() error = %v", err)
 	}

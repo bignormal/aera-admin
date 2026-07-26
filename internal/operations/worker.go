@@ -125,6 +125,10 @@ func (worker *Worker) process(ctx context.Context, job Job) error {
 		operation, err = worker.cloud.RevokeDevice(ctx, job.TargetID, meta)
 	case RevokeSession:
 		operation, err = worker.cloud.RevokeSession(ctx, job.TargetID, meta)
+	case RevokeAllSessions:
+		operation, err = worker.cloud.RevokeAllSessions(ctx, job.TargetID, meta)
+	case ForcePasswordReset:
+		operation, err = worker.cloud.ForcePasswordReset(ctx, job.TargetID, meta)
 	case DisableUser:
 		operation, err = worker.cloud.DisableUser(ctx, job.TargetID, meta)
 	case EnableUser:

@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Card,
+  Drawer,
   Empty,
   Input,
   Modal,
@@ -34,7 +35,7 @@ import { CloudBoundary } from '../components/CloudBoundary';
 import { OperationStatus } from '../components/OperationStatus';
 import { ReasonForm } from '../components/ReasonForm';
 
-type RevokeTarget = { kind: 'device' | 'session'; id: string };
+type RevokeTarget = { kind: 'device' | 'session' | 'all_sessions' | 'password_reset'; id: string };
 
 const userIDSchema = z.string().trim().uuid();
 
@@ -74,6 +75,7 @@ export function CloudDevicesPage() {
   const [userIDError, setUserIDError] = useState<string | null>(null);
   const [selectedUserID, setSelectedUserID] = useState<string | null>(null);
   const [target, setTarget] = useState<RevokeTarget | null>(null);
+  const [detailDevice, setDetailDevice] = useState<CloudDevice | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [acceptedOperation, setAcceptedOperation] = useState<AdminOperation | null>(null);
   const [operationID, setOperationID] = useState<string | null>(null);
@@ -81,9 +83,10 @@ export function CloudDevicesPage() {
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const [pendingAfterStepUp, setPendingAfterStepUp] = useState<(() => Promise<AdminOperation>) | null>(null);
   const revokeInFlight = useRef(false);
-  const role = auth.session?.administrator.role;
-  const canRevokeDevice = role ? hasPermission(role, 'cloud_device.revoke') : false;
-  const canRevokeSession = role ? hasPermission(role, 'cloud_session.revoke') : false;
+  const granted = auth.session?.administrator.permissions;
+  const canRevokeDevice = hasPermission(granted, 'cloud_device.revoke');
+  const canRevokeSession = hasPermission(granted, 'cloud_session.revoke');
+  const canForceReset = hasPermission(granted, 'account_lifecycle.initiate');
 
   const user = useQuery({
     queryKey: ['cloud-user', selectedUserID],
@@ -110,7 +113,11 @@ export function CloudDevicesPage() {
       const path =
         target.kind === 'device'
           ? `/cloud-devices/${target.id}/revoke`
-          : `/cloud-sessions/${target.id}/revoke`;
+          : target.kind === 'all_sessions'
+            ? `/cloud-users/${target.id}/sessions/revoke-all`
+            : target.kind === 'password_reset'
+              ? `/cloud-users/${target.id}/password/reset`
+              : `/cloud-sessions/${target.id}/revoke`;
       return postIdempotentJSON<AdminOperation>(
         path,
         {
@@ -229,13 +236,19 @@ export function CloudDevicesPage() {
     {
       title: '操作',
       key: 'action',
-      width: 110,
-      render: (_, device) =>
-        canRevokeDevice && device.status !== 'revoked' ? (
-          <Button danger type="link" onClick={() => openRevoke({ kind: 'device', id: device.device_id })}>
-            撤销设备
+      width: 190,
+      render: (_, device) => (
+        <Space>
+          <Button type="link" onClick={() => setDetailDevice(device)}>
+            查看详情
           </Button>
-        ) : null,
+          {canRevokeDevice && device.status !== 'revoked' ? (
+            <Button danger type="link" onClick={() => openRevoke({ kind: 'device', id: device.device_id })}>
+              撤销设备
+            </Button>
+          ) : null}
+        </Space>
+      ),
     },
   ];
 
@@ -317,6 +330,15 @@ export function CloudDevicesPage() {
                   <Typography.Text strong>{user.data.masked_email ?? user.data.masked_phone ?? '—'}</Typography.Text>
                   <Typography.Text type="secondary">用户 ID：{user.data.user_id}</Typography.Text>
                   <Typography.Text type="secondary">管理修订号：{user.data.administrative_revision}</Typography.Text>
+                  {canForceReset && user.data.status === 'active' && (
+                    <Button
+                      danger
+                      size="small"
+                      onClick={() => openRevoke({ kind: 'password_reset', id: user.data.user_id })}
+                    >
+                      重置密码
+                    </Button>
+                  )}
                 </Space>
               </Card>
             )}
@@ -346,7 +368,18 @@ export function CloudDevicesPage() {
             onRetry={() => void sessions.refetch()}
           >
             <Card className="data-card cloud-resource-card">
-              <div className="data-card-toolbar"><Typography.Text strong>会话</Typography.Text></div>
+              <div className="data-card-toolbar">
+                <Typography.Text strong>会话</Typography.Text>
+                {canRevokeSession && user.data && (sessions.data?.items.some((s) => s.status === 'active') ?? false) && (
+                  <Button
+                    danger
+                    size="small"
+                    onClick={() => openRevoke({ kind: 'all_sessions', id: user.data.user_id })}
+                  >
+                    强制登出全部会话
+                  </Button>
+                )}
+              </div>
               <Table
                 rowKey="session_id"
                 loading={sessions.isPending}
@@ -388,7 +421,15 @@ export function CloudDevicesPage() {
       )}
 
       <Modal
-        title={target?.kind === 'device' ? '撤销 Cloud 设备' : '撤销 Cloud 会话'}
+        title={
+          target?.kind === 'device'
+            ? '撤销 Cloud 设备'
+            : target?.kind === 'all_sessions'
+              ? '强制登出全部会话'
+              : target?.kind === 'password_reset'
+                ? '重置用户密码'
+                : '撤销 Cloud 会话'
+        }
         open={Boolean(target)}
         footer={null}
         destroyOnHidden
@@ -411,8 +452,8 @@ export function CloudDevicesPage() {
         {actionError && <Alert className="page-alert" type="error" showIcon message={actionError} />}
         {target && (
           <ReasonForm
-            usage={target.kind}
-            submitLabel="确认撤销"
+            usage={target.kind === 'device' ? 'device' : target.kind === 'password_reset' ? 'account' : 'session'}
+            submitLabel={target.kind === 'password_reset' ? '确认重置密码' : '确认撤销'}
             pending={revoke.isPending}
             onSubmit={submitRevoke}
           />
@@ -430,6 +471,26 @@ export function CloudDevicesPage() {
         }}
         onVerified={retryAfterStepUp}
       />
+
+      <Drawer
+        title="设备详情"
+        width={460}
+        open={Boolean(detailDevice)}
+        destroyOnHidden
+        onClose={() => setDetailDevice(null)}
+      >
+        {detailDevice && (
+          <dl className="detail-drawer-grid">
+            <dt>设备名称</dt><dd>{detailDevice.display_name || '—'}</dd>
+            <dt>设备 ID</dt><dd>{detailDevice.device_id}</dd>
+            <dt>归属用户 ID</dt><dd>{detailDevice.user_id}</dd>
+            <dt>平台</dt><dd>{detailDevice.platform || '—'}</dd>
+            <dt>客户端版本</dt><dd>{detailDevice.client_version || '—'}</dd>
+            <dt>状态</dt><dd>{deviceStatus[detailDevice.status].label}</dd>
+            <dt>最近在线</dt><dd>{formatTime(detailDevice.last_seen_at)}</dd>
+          </dl>
+        )}
+      </Drawer>
     </div>
   );
 }

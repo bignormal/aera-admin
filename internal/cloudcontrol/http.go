@@ -32,10 +32,15 @@ type HandlerService interface {
 	ListUsers(context.Context, admin.Actor, cloudadmin.ListUsersRequest) (cloudadmin.Page[cloudadmin.User], error)
 	LookupUser(context.Context, admin.Actor, cloudadmin.LookupRequest) (cloudadmin.User, error)
 	GetUser(context.Context, admin.Actor, uuid.UUID) (cloudadmin.User, error)
+	UserMemberships(context.Context, admin.Actor, uuid.UUID) (cloudadmin.UserMemberships, error)
+	Stats(context.Context, admin.Actor) (cloudadmin.PlatformStats, error)
+	DeviceStats(context.Context, admin.Actor) (cloudadmin.DeviceStats, error)
 	ListDevices(context.Context, admin.Actor, uuid.UUID, cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.Device], error)
 	ListSessions(context.Context, admin.Actor, uuid.UUID, cloudadmin.PageRequest) (cloudadmin.Page[cloudadmin.Session], error)
 	RevokeDevice(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error)
 	RevokeSession(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error)
+	RevokeAllSessions(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error)
+	ForcePasswordReset(context.Context, admin.Actor, uuid.UUID, int64, admin.ActionReason, string) (operations.Result, error)
 	CreateApproval(context.Context, approval.CreateRequest) (approval.Request, error)
 	ListApprovals(context.Context, admin.Actor, approval.ListFilter) (approval.Page, error)
 	GetApproval(context.Context, admin.Actor, uuid.UUID) (approval.Request, error)
@@ -98,12 +103,17 @@ func NewHandlerWithLogger(service HandlerService, logger *slog.Logger) http.Hand
 	}
 	router := chi.NewRouter()
 	router.With(requirePermission(rbac.ReadCloudUsers)).Get("/cloud-users", listUsersHTTP(service, logger))
+	router.With(requirePermission(rbac.ReadCloudUsers)).Get("/cloud-stats", statsHTTP(service))
+	router.With(requirePermission(rbac.ReadCloudDevices)).Get("/cloud-device-stats", deviceStatsHTTP(service))
 	router.With(requirePermission(rbac.ExactIdentityLookup)).Post("/cloud-users/lookup", lookupUserHTTP(service, logger))
 	router.With(anyPermission(rbac.ReadCloudUsers, rbac.ReadTechnicalUserFields)).Get("/cloud-users/{userID}", getUserHTTP(service))
+	router.With(requirePermission(rbac.ReadCloudUsers)).Get("/cloud-users/{userID}/memberships", membershipsHTTP(service))
 	router.With(requirePermission(rbac.ReadCloudDevices)).Get("/cloud-users/{userID}/devices", listDevicesHTTP(service))
 	router.With(requirePermission(rbac.ReadCloudDevices)).Get("/cloud-users/{userID}/sessions", listSessionsHTTP(service))
 	router.With(requirePermission(rbac.RevokeCloudDevice), recentTOTP()).Post("/cloud-devices/{deviceID}/revoke", revokeDeviceHTTP(service))
 	router.With(requirePermission(rbac.RevokeCloudSession), recentTOTP()).Post("/cloud-sessions/{sessionID}/revoke", revokeSessionHTTP(service))
+	router.With(requirePermission(rbac.RevokeCloudSession), recentTOTP()).Post("/cloud-users/{userID}/sessions/revoke-all", revokeAllSessionsHTTP(service))
+	router.With(requirePermission(rbac.InitiateAccountLifecycle), recentTOTP()).Post("/cloud-users/{userID}/password/reset", forcePasswordResetHTTP(service))
 	router.With(requirePermission(rbac.InitiateAccountLifecycle), recentTOTP()).Post("/approval-requests", createApprovalHTTP(service))
 	router.With(anyPermission(rbac.InitiateAccountLifecycle, rbac.ApproveAccountLifecycle)).Get("/approval-requests", listApprovalsHTTP(service))
 	router.With(anyPermission(rbac.InitiateAccountLifecycle, rbac.ApproveAccountLifecycle)).Get("/approval-requests/{approvalID}", getApprovalHTTP(service))
@@ -300,6 +310,55 @@ func getUserHTTP(service HandlerService) http.HandlerFunc {
 	}
 }
 
+func membershipsHTTP(service HandlerService) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		actor, ok := requestActor(response, request)
+		if !ok {
+			return
+		}
+		id, ok := parseID(response, request, "userID")
+		if !ok {
+			return
+		}
+		result, err := service.UserMemberships(request.Context(), actor, id)
+		if err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, result)
+	}
+}
+
+func statsHTTP(service HandlerService) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		actor, ok := requestActor(response, request)
+		if !ok {
+			return
+		}
+		result, err := service.Stats(request.Context(), actor)
+		if err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, result)
+	}
+}
+
+func deviceStatsHTTP(service HandlerService) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		actor, ok := requestActor(response, request)
+		if !ok {
+			return
+		}
+		result, err := service.DeviceStats(request.Context(), actor)
+		if err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, result)
+	}
+}
+
 func listDevicesHTTP(service HandlerService) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		actor, ok := requestActor(response, request)
@@ -397,6 +456,60 @@ func revokeSessionHTTP(service HandlerService) http.HandlerFunc {
 			return
 		}
 		result, err := service.RevokeSession(
+			request.Context(), actor, id, payload.ExpectedRevision,
+			mutationReason(payload, actor), request.Header.Get("Idempotency-Key"),
+		)
+		if err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusAccepted, result)
+	}
+}
+
+func revokeAllSessionsHTTP(service HandlerService) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		actor, ok := requestActor(response, request)
+		if !ok {
+			return
+		}
+		id, ok := parseID(response, request, "userID")
+		if !ok {
+			return
+		}
+		var payload mutationPayload
+		if err := decodeJSON(response, request, maximumJSONBody, &payload); err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		result, err := service.RevokeAllSessions(
+			request.Context(), actor, id, payload.ExpectedRevision,
+			mutationReason(payload, actor), request.Header.Get("Idempotency-Key"),
+		)
+		if err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusAccepted, result)
+	}
+}
+
+func forcePasswordResetHTTP(service HandlerService) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		actor, ok := requestActor(response, request)
+		if !ok {
+			return
+		}
+		id, ok := parseID(response, request, "userID")
+		if !ok {
+			return
+		}
+		var payload mutationPayload
+		if err := decodeJSON(response, request, maximumJSONBody, &payload); err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		result, err := service.ForcePasswordReset(
 			request.Context(), actor, id, payload.ExpectedRevision,
 			mutationReason(payload, actor), request.Header.Get("Idempotency-Key"),
 		)

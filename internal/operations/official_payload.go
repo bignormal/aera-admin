@@ -128,7 +128,7 @@ type OfficialReleaseRollbackPayload struct {
 
 func canonicalCommandPayload(action Action, input json.RawMessage) ([]byte, [sha256.Size]byte, error) {
 	if len(input) == 0 {
-		if action == RevokeDevice || action == RevokeSession || action == DisableUser || action == EnableUser {
+		if action == RevokeDevice || action == RevokeSession || action == DisableUser || action == EnableUser || action == RevokeAllSessions || action == ForcePasswordReset {
 			input = json.RawMessage(`{}`)
 		} else {
 			return nil, [sha256.Size]byte{}, ErrInvalidRequest
@@ -140,7 +140,7 @@ func canonicalCommandPayload(action Action, input json.RawMessage) ([]byte, [sha
 
 	var target any
 	switch action {
-	case RevokeDevice, RevokeSession, DisableUser, EnableUser,
+	case RevokeDevice, RevokeSession, DisableUser, EnableUser, RevokeAllSessions, ForcePasswordReset,
 		OfficialDraftSubmit, OfficialSubmissionWithdraw, OfficialReleasePause, OfficialReleaseResume:
 		target = &struct{}{}
 	case OfficialDefinitionReserve:
@@ -172,7 +172,7 @@ func canonicalCommandPayload(action Action, input json.RawMessage) ([]byte, [sha
 
 func validateAndCanonicalizeOfficialPayload(action Action, target any) error {
 	switch action {
-	case RevokeDevice, RevokeSession, DisableUser, EnableUser,
+	case RevokeDevice, RevokeSession, DisableUser, EnableUser, RevokeAllSessions, ForcePasswordReset,
 		OfficialDraftSubmit, OfficialSubmissionWithdraw, OfficialReleasePause, OfficialReleaseResume:
 		return nil
 	case OfficialDefinitionReserve:

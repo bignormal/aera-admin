@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '../auth/AuthProvider';
+import { rolePermissions } from '../api/contracts';
 import { OfficialAgentReleasesPage } from './OfficialAgentReleasesPage';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -45,7 +46,7 @@ function session() {
     csrf_token: 'csrf-in-memory-only',
     administrator: {
       admin_id: '019f0000-0000-7000-8000-000000000231', session_id: '019f0000-0000-7000-8000-000000000232',
-      role: 'operator', security_version: 1, mfa_authenticated_at: '2026-07-22T08:00:00Z',
+      role: 'operator', permissions: [...(rolePermissions.operator ?? [])], security_version: 1, mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z', mfa_method: 'totp',
     }, display_name: '运营人员', absolute_expires_at: '2026-07-22T18:00:00Z',
   };

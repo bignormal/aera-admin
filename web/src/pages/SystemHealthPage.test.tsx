@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { SessionDocument } from '../api/contracts';
+import { rolePermissions, type SessionDocument } from '../api/contracts';
 import { AuthProvider } from '../auth/AuthProvider';
 import { SystemHealthPage } from './SystemHealthPage';
 
@@ -70,6 +70,7 @@ function sessionForDeveloper(): SessionDocument {
       admin_id: '019f0000-0000-7000-8000-000000000071',
       session_id: '019f0000-0000-7000-8000-000000000072',
       role: 'developer',
+      permissions: [...(rolePermissions.developer ?? [])],
       security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z',

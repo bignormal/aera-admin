@@ -73,7 +73,9 @@ func TestRequireAllowsAuthorizedRoleAndPreservesPrincipal(t *testing.T) {
 	}
 	handler := Require(rbac.RevokeCloudSession, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		got, ok := PrincipalFromContext(request.Context())
-		if !ok || got != principal {
+		if !ok || got.AdminID != principal.AdminID || got.SessionID != principal.SessionID ||
+			got.Role != principal.Role || got.SecurityVersion != principal.SecurityVersion ||
+			!got.MFAAuthenticatedAt.Equal(principal.MFAAuthenticatedAt) {
 			t.Fatalf("PrincipalFromContext() = %+v, %v, want %+v, true", got, ok, principal)
 		}
 		response.WriteHeader(http.StatusNoContent)

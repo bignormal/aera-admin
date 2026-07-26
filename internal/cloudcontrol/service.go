@@ -163,6 +163,57 @@ func (service *Service) GetUser(ctx context.Context, actor admin.Actor, userID u
 	return user, nil
 }
 
+// UserMemberships returns the organizations and workspaces a user belongs to.
+// It is read-only and reuses the cloud-user read permission.
+func (service *Service) UserMemberships(ctx context.Context, actor admin.Actor, userID uuid.UUID) (cloudadmin.UserMemberships, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.ReadCloudUsers) {
+		return cloudadmin.UserMemberships{}, ErrPermissionDenied
+	}
+	if userID == uuid.Nil {
+		return cloudadmin.UserMemberships{}, ErrInvalidRequest
+	}
+	memberships, err := service.cloud.UserMemberships(ctx, userID)
+	if err != nil {
+		return cloudadmin.UserMemberships{}, mapCloudError(err)
+	}
+	if err := memberships.Validate(); err != nil {
+		return cloudadmin.UserMemberships{}, cloudadmin.ErrContractViolation
+	}
+	return memberships, nil
+}
+
+// Stats returns aera-cloud account and device counters for the admin overview.
+// It is read-only and reuses the cloud-user read permission.
+func (service *Service) Stats(ctx context.Context, actor admin.Actor) (cloudadmin.PlatformStats, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.ReadCloudUsers) {
+		return cloudadmin.PlatformStats{}, ErrPermissionDenied
+	}
+	stats, err := service.cloud.Stats(ctx)
+	if err != nil {
+		return cloudadmin.PlatformStats{}, mapCloudError(err)
+	}
+	if err := stats.Validate(); err != nil {
+		return cloudadmin.PlatformStats{}, cloudadmin.ErrContractViolation
+	}
+	return stats, nil
+}
+
+// DeviceStats returns the aera-cloud device version/platform distribution.
+// It is read-only and reuses the cloud-device read permission.
+func (service *Service) DeviceStats(ctx context.Context, actor admin.Actor) (cloudadmin.DeviceStats, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.ReadCloudDevices) {
+		return cloudadmin.DeviceStats{}, ErrPermissionDenied
+	}
+	stats, err := service.cloud.DeviceStats(ctx)
+	if err != nil {
+		return cloudadmin.DeviceStats{}, mapCloudError(err)
+	}
+	if err := stats.Validate(); err != nil {
+		return cloudadmin.DeviceStats{}, cloudadmin.ErrContractViolation
+	}
+	return stats, nil
+}
+
 func (service *Service) ListDevices(
 	ctx context.Context,
 	actor admin.Actor,
@@ -249,6 +300,64 @@ func (service *Service) RevokeSession(
 	}
 	return service.operations.EnqueueImmediate(ctx, operations.EnqueueRequest{
 		Actor: actor, Action: operations.RevokeSession, TargetID: sessionID,
+		ExpectedRevision: expectedRevision, Reason: reason, BrowserIdempotencyKey: idempotencyKey,
+	})
+}
+
+// RevokeAllSessions force-logs-out every session of a user. It is an immediate
+// operator action (no dual approval), reusing the session-revocation permission
+// and reason category, and matching the single-revocation abuse controls.
+func (service *Service) RevokeAllSessions(
+	ctx context.Context,
+	actor admin.Actor,
+	userID uuid.UUID,
+	expectedRevision int64,
+	reason admin.ActionReason,
+	idempotencyKey string,
+) (operations.Result, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.RevokeCloudSession) {
+		return operations.Result{}, ErrPermissionDenied
+	}
+	if !validCloudMutation(userID, expectedRevision, reason, idempotencyKey) {
+		return operations.Result{}, ErrInvalidRequest
+	}
+	if service == nil || service.reasons == nil {
+		return operations.Result{}, adminsettings.ErrUnavailable
+	}
+	if err := service.reasons.ValidateReason(ctx, adminsettings.UsageSession, reason.Code); err != nil {
+		return operations.Result{}, err
+	}
+	return service.operations.EnqueueImmediate(ctx, operations.EnqueueRequest{
+		Actor: actor, Action: operations.RevokeAllSessions, TargetID: userID,
+		ExpectedRevision: expectedRevision, Reason: reason, BrowserIdempotencyKey: idempotencyKey,
+	})
+}
+
+// ForcePasswordReset invalidates the user's password (forcing verified reset)
+// and revokes all sessions. It is an immediate account action gated by the
+// account-lifecycle initiate permission and the account reason category.
+func (service *Service) ForcePasswordReset(
+	ctx context.Context,
+	actor admin.Actor,
+	userID uuid.UUID,
+	expectedRevision int64,
+	reason admin.ActionReason,
+	idempotencyKey string,
+) (operations.Result, error) {
+	if actor.AdminID == uuid.Nil || !rbac.Allowed(actor.Role, rbac.InitiateAccountLifecycle) {
+		return operations.Result{}, ErrPermissionDenied
+	}
+	if !validCloudMutation(userID, expectedRevision, reason, idempotencyKey) {
+		return operations.Result{}, ErrInvalidRequest
+	}
+	if service == nil || service.reasons == nil {
+		return operations.Result{}, adminsettings.ErrUnavailable
+	}
+	if err := service.reasons.ValidateReason(ctx, adminsettings.UsageAccount, reason.Code); err != nil {
+		return operations.Result{}, err
+	}
+	return service.operations.EnqueueImmediate(ctx, operations.EnqueueRequest{
+		Actor: actor, Action: operations.ForcePasswordReset, TargetID: userID,
 		ExpectedRevision: expectedRevision, Reason: reason, BrowserIdempotencyKey: idempotencyKey,
 	})
 }

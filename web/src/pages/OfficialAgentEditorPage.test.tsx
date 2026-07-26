@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '../auth/AuthProvider';
+import { rolePermissions } from '../api/contracts';
 import { OfficialAgentEditorPage } from './OfficialAgentEditorPage';
 
 const definitionID = '019f0000-0000-7000-8000-000000000211';
@@ -44,7 +45,7 @@ function session() {
     csrf_token: 'csrf-in-memory-only',
     administrator: {
       admin_id: '019f0000-0000-7000-8000-000000000201',
-      session_id: '019f0000-0000-7000-8000-000000000202', role: 'developer', security_version: 1,
+      session_id: '019f0000-0000-7000-8000-000000000202', role: 'developer', permissions: [...(rolePermissions.developer ?? [])], security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z', totp_authenticated_at: '2026-07-22T08:00:00Z', mfa_method: 'totp',
     },
     display_name: '开发人员', absolute_expires_at: '2026-07-22T18:00:00Z',

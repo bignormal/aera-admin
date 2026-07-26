@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '../auth/AuthProvider';
+import { rolePermissions } from '../api/contracts';
 import { OfficialAgentsPage } from './OfficialAgentsPage';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -44,6 +45,7 @@ function session(role: string) {
       admin_id: '019f0000-0000-7000-8000-000000000201',
       session_id: '019f0000-0000-7000-8000-000000000202',
       role,
+      permissions: [...(rolePermissions[role] ?? [])],
       security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z',

@@ -19,7 +19,7 @@ import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Space, Tag, Typogra
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
-import { hasAnyPermission, roleLabels, type Permission } from '../api/contracts';
+import { hasAnyPermission, roleLabel, type Permission } from '../api/contracts';
 import { useAuth } from '../auth/AuthProvider';
 import { FullPageLoader } from '../auth/PermissionGate';
 import '../styles/global.css';
@@ -58,10 +58,10 @@ export function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
-  const role = auth.session?.administrator.role;
+  const permissions = auth.session?.administrator.permissions;
   const visibleNavigation = useMemo(
-    () => navigation.filter((item) => !item.permissions || (role && hasAnyPermission(role, item.permissions))),
-    [role],
+    () => navigation.filter((item) => !item.permissions || hasAnyPermission(permissions, item.permissions)),
+    [permissions],
   );
   const active = useMemo(
     () => visibleNavigation.find((item) => location.pathname.startsWith(item.key)) ?? visibleNavigation[0],
@@ -136,7 +136,7 @@ export function AdminLayout() {
                 <Avatar size={32}>{auth.session.display_name.slice(0, 1)}</Avatar>
                 <span className="admin-operator">
                   <strong>{auth.session.display_name}</strong>
-                  <small>{roleLabels[auth.session.administrator.role]}</small>
+                  <small>{roleLabel(auth.session.administrator.role)}</small>
                 </span>
               </Button>
             </Dropdown>

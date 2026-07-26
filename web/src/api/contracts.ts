@@ -9,7 +9,9 @@ export const roles = [
   'auditor',
 ] as const;
 
-export type AdminRole = (typeof roles)[number];
+// Roles are data-driven and editable at runtime, so AdminRole is any role slug
+// rather than a fixed union. The list below is only the built-in system roles.
+export type AdminRole = string;
 
 export const roleLabels: Record<AdminRole, string> = {
   super_admin: '超级管理员',
@@ -107,21 +109,48 @@ export const rolePermissions: Record<AdminRole, readonly Permission[]> = {
 };
 
 export function isAdminRole(value: unknown): value is AdminRole {
-  return typeof value === 'string' && roles.includes(value as AdminRole);
+  return typeof value === 'string' && /^[a-z][a-z0-9_]{1,49}$/.test(value);
 }
 
-export function hasPermission(role: AdminRole, permission: Permission): boolean {
-  return rolePermissions[role]?.includes(permission) ?? false;
+export function roleLabel(role: string): string {
+  return (roleLabels as Record<string, string | undefined>)[role] ?? role;
 }
 
-export function hasAnyPermission(role: AdminRole, required: readonly Permission[]): boolean {
-  return required.some((permission) => hasPermission(role, permission));
+// Permission checks operate on the current administrator's EFFECTIVE permission
+// set (delivered in the session document), because roles are now data-driven and
+// editable; the static rolePermissions map is only a build-time fallback.
+export function hasPermission(granted: readonly string[] | undefined, permission: Permission): boolean {
+  return Boolean(granted?.includes(permission));
+}
+
+export function hasAnyPermission(granted: readonly string[] | undefined, required: readonly Permission[]): boolean {
+  return required.some((permission) => hasPermission(granted, permission));
+}
+
+export interface RbacRole {
+  slug: string;
+  name: string;
+  description: string;
+  is_system: boolean;
+  permissions: Permission[];
+  user_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RbacRoleList {
+  roles: RbacRole[];
+}
+
+export interface RbacCatalog {
+  permissions: Permission[];
 }
 
 export interface AdministratorPrincipal {
   admin_id: string;
   session_id: string;
   role: AdminRole;
+  permissions: string[];
   security_version: number;
   mfa_authenticated_at: string;
   totp_authenticated_at: string | null;
@@ -150,6 +179,7 @@ export function isSessionDocument(value: unknown): value is SessionDocument {
     typeof principal?.admin_id === 'string' &&
     typeof principal.session_id === 'string' &&
     isAdminRole(principal.role) &&
+    Array.isArray(principal.permissions) &&
     typeof principal.security_version === 'number' &&
     principal.security_version > 0 &&
     typeof principal.mfa_authenticated_at === 'string' &&
@@ -231,6 +261,41 @@ export interface CloudUser {
   active_session_count: number;
   created_at: string;
   last_cloud_activity_at?: string;
+}
+
+// CloudStats mirrors the aera-cloud admin overview counters (no personal data).
+export interface CloudStats {
+  user_total: number;
+  user_active: number;
+  user_disabled: number;
+  user_pending_deletion: number;
+  device_total: number;
+  device_active: number;
+}
+
+export interface CloudDeviceVersionStat {
+  platform: string;
+  app_version: string;
+  total: number;
+  active: number;
+}
+
+// CloudDeviceStats is the installed base grouped by platform and app version.
+export interface CloudDeviceStats {
+  buckets: CloudDeviceVersionStat[];
+}
+
+export interface CloudMembership {
+  id: string;
+  display_name: string;
+  role: string;
+  status: string;
+}
+
+// CloudUserMemberships lists the orgs and workspaces a user belongs to.
+export interface CloudUserMemberships {
+  organizations: CloudMembership[];
+  workspaces: CloudMembership[];
 }
 
 export interface CloudDevice {
@@ -409,7 +474,7 @@ export interface AuditEventPage {
 const officialUUIDSchema = z.uuid();
 const officialTimestampSchema = z.iso.datetime({ offset: true });
 const officialDigestSchema = z.string().regex(/^[0-9a-f]{64}$/);
-const officialRoleSchema = z.enum(roles);
+const officialRoleSchema = z.string().regex(/^[a-z][a-z0-9_]{1,49}$/);
 
 export const officialManifestSchema = z.strictObject({
   schema_version: z.literal(1),

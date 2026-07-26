@@ -4,12 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  AdminRole,
-  ApprovalRequest,
-  ApprovalStatus,
-  ApprovalExecutionStatus,
-  SessionDocument,
+import {
+  rolePermissions,
+  type AdminRole,
+  type ApprovalRequest,
+  type ApprovalStatus,
+  type ApprovalExecutionStatus,
+  type SessionDocument,
 } from '../api/contracts';
 import { AuthProvider } from '../auth/AuthProvider';
 import { ApprovalsPage } from './ApprovalsPage';
@@ -179,6 +180,7 @@ function sessionFor(role: AdminRole, adminID: string): SessionDocument {
       admin_id: adminID,
       session_id: '019f0000-0000-7000-8000-000000000066',
       role,
+      permissions: [...(rolePermissions[role] ?? [])],
       security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z',

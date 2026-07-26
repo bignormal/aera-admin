@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AdminRole, SessionDocument } from '../api/contracts';
+import { rolePermissions, type AdminRole, type SessionDocument } from '../api/contracts';
 import { AuthProvider } from '../auth/AuthProvider';
 import { SystemSettingsPage } from './SystemSettingsPage';
 
@@ -225,6 +225,7 @@ function sessionFor(role: AdminRole): SessionDocument {
       admin_id: '019f0000-0000-7000-8000-000000000071',
       session_id: '019f0000-0000-7000-8000-000000000072',
       role,
+      permissions: [...(rolePermissions[role] ?? [])],
       security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z',

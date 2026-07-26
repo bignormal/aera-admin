@@ -280,6 +280,28 @@ func (client *httpClient) LookupUser(ctx context.Context, input LookupRequest) (
 	return result, nil
 }
 
+func (client *httpClient) Stats(ctx context.Context) (PlatformStats, error) {
+	var result PlatformStats
+	if err := client.doJSON(ctx, http.MethodGet, "/internal/admin/v1/stats", nil, nil, nil, &result); err != nil {
+		return PlatformStats{}, err
+	}
+	if err := result.Validate(); err != nil {
+		return PlatformStats{}, err
+	}
+	return result, nil
+}
+
+func (client *httpClient) DeviceStats(ctx context.Context) (DeviceStats, error) {
+	var result DeviceStats
+	if err := client.doJSON(ctx, http.MethodGet, "/internal/admin/v1/devices/stats", nil, nil, nil, &result); err != nil {
+		return DeviceStats{}, err
+	}
+	if err := result.Validate(); err != nil {
+		return DeviceStats{}, err
+	}
+	return result, nil
+}
+
 func (client *httpClient) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 	if id == uuid.Nil {
 		return User{}, ErrContractViolation
@@ -290,6 +312,20 @@ func (client *httpClient) GetUser(ctx context.Context, id uuid.UUID) (User, erro
 	}
 	if err := result.Validate(); err != nil || result.ID != id {
 		return User{}, ErrContractViolation
+	}
+	return result, nil
+}
+
+func (client *httpClient) UserMemberships(ctx context.Context, id uuid.UUID) (UserMemberships, error) {
+	if id == uuid.Nil {
+		return UserMemberships{}, ErrContractViolation
+	}
+	var result UserMemberships
+	if err := client.doJSON(ctx, http.MethodGet, "/internal/admin/v1/users/"+id.String()+"/memberships", nil, nil, nil, &result); err != nil {
+		return UserMemberships{}, err
+	}
+	if err := result.Validate(); err != nil {
+		return UserMemberships{}, err
 	}
 	return result, nil
 }
@@ -340,6 +376,14 @@ func (client *httpClient) RevokeDevice(ctx context.Context, id uuid.UUID, meta C
 
 func (client *httpClient) RevokeSession(ctx context.Context, id uuid.UUID, meta CommandMeta) (Operation, error) {
 	return client.command(ctx, "/internal/admin/v1/sessions/"+id.String()+"/revoke", id, meta)
+}
+
+func (client *httpClient) RevokeAllSessions(ctx context.Context, id uuid.UUID, meta CommandMeta) (Operation, error) {
+	return client.command(ctx, "/internal/admin/v1/users/"+id.String()+"/sessions/revoke-all", id, meta)
+}
+
+func (client *httpClient) ForcePasswordReset(ctx context.Context, id uuid.UUID, meta CommandMeta) (Operation, error) {
+	return client.command(ctx, "/internal/admin/v1/users/"+id.String()+"/password/reset", id, meta)
 }
 
 func (client *httpClient) DisableUser(ctx context.Context, id uuid.UUID, meta CommandMeta) (Operation, error) {

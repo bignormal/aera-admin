@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AdminRole, CloudDevice, CloudUser, SessionDocument } from '../api/contracts';
+import { rolePermissions, type AdminRole, type CloudDevice, type CloudUser, type SessionDocument } from '../api/contracts';
 import { AuthProvider } from '../auth/AuthProvider';
 import { CloudDevicesPage } from './CloudDevicesPage';
 
@@ -138,6 +138,7 @@ function sessionFor(role: AdminRole): SessionDocument {
       admin_id: '019f0000-0000-7000-8000-000000000094',
       session_id: '019f0000-0000-7000-8000-000000000095',
       role,
+      permissions: [...(rolePermissions[role] ?? [])],
       security_version: 1,
       mfa_authenticated_at: '2026-07-22T08:00:00Z',
       totp_authenticated_at: '2026-07-22T08:00:00Z',

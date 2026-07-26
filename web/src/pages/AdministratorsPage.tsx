@@ -30,12 +30,12 @@ import { APIError, postJSON, putJSON, request } from '../api/client';
 import { useReasonCodes } from '../api/settings';
 import {
   hasPermission,
-  roleLabels,
-  roles,
+  roleLabel,
   type AdminRole,
   type Administrator,
   type AdministratorList,
   type InvitationResult,
+  type RbacRoleList,
   type ReasonCode,
 } from '../api/contracts';
 import { useAuth } from '../auth/AuthProvider';
@@ -51,12 +51,12 @@ const reasonFields = {
 const inviteSchema = z.object({
   email: z.string().trim().email('请输入有效的内部邮箱').max(254),
   displayName: z.string().trim().min(1, '请输入显示名称').max(80),
-  role: z.enum(roles),
+  role: z.string().regex(/^[a-z][a-z0-9_]{1,49}$/),
   ...reasonFields,
 });
 
 const actionSchema = z.object({
-  role: z.enum(roles),
+  role: z.string().regex(/^[a-z][a-z0-9_]{1,49}$/),
   ...reasonFields,
 });
 
@@ -164,8 +164,8 @@ export function AdministratorsPage() {
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
   const submissionLock = useRef(false);
-  const role = auth.session?.administrator.role;
-  const canManage = role ? hasPermission(role, 'administrator.manage') : false;
+  const granted = auth.session?.administrator.permissions;
+  const canManage = hasPermission(granted, 'administrator.manage');
   const currentAdminID = auth.session?.administrator.admin_id;
 
   const administratorReasons = useReasonCodes(
@@ -189,6 +189,14 @@ export function AdministratorsPage() {
     enabled: Boolean(auth.session),
     retry: false,
   });
+
+  const roleCatalog = useQuery({
+    queryKey: ['rbac-roles'],
+    queryFn: () => request<RbacRoleList>('/rbac/roles'),
+    enabled: Boolean(auth.session) && canManage,
+    retry: false,
+  });
+  const roleOptions = (roleCatalog.data?.roles ?? []).map((item) => ({ value: item.slug, label: item.name }));
 
   const inviteForm = useForm<InviteFields>({
     resolver: zodResolver(inviteSchema),
@@ -314,7 +322,7 @@ export function AdministratorsPage() {
           </div>
         ),
       },
-      { title: '角色', dataIndex: 'role', width: 130, render: (value: AdminRole) => roleLabels[value] },
+      { title: '角色', dataIndex: 'role', width: 130, render: (value: AdminRole) => roleLabel(value) },
       {
         title: '状态', dataIndex: 'status', width: 105,
         render: (value: Administrator['status']) => {
@@ -424,7 +432,7 @@ export function AdministratorsPage() {
             <Controller
               name="role"
               control={inviteForm.control}
-              render={({ field }) => <Select {...field} aria-label="固定角色" options={roles.map((value) => ({ value, label: roleLabels[value] }))} />}
+              render={({ field }) => <Select {...field} aria-label="角色" options={roleOptions} />}
             />
           </Form.Item>
           <ReasonControls
@@ -471,7 +479,7 @@ export function AdministratorsPage() {
               <Controller
                 name="role"
                 control={actionForm.control}
-                render={({ field }) => <Select {...field} aria-label="新角色" options={roles.map((value) => ({ value, label: roleLabels[value] }))} />}
+                render={({ field }) => <Select {...field} aria-label="新角色" options={roleOptions} />}
               />
             </Form.Item>
           )}

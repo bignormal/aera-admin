@@ -5,13 +5,16 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Badge, Card, Col, Row, Space, Steps, Tag, Typography } from 'antd';
+import { Alert, Badge, Card, Col, Row, Space, Steps, Table, Tag, Typography } from 'antd';
 import type { ReactNode } from 'react';
 
 import { request } from '../api/client';
 import {
   hasPermission,
   type CloudAvailability,
+  type CloudDeviceStats,
+  type CloudDeviceVersionStat,
+  type CloudStats,
   type Page,
   type ApprovalRequest,
   type SystemHealth,
@@ -47,7 +50,10 @@ function deniedStatus(): StatusPresentation {
 export function DashboardPage() {
   const auth = useAuth();
   const role = auth.session?.administrator.role;
-  const canReadHealth = role ? hasPermission(role, 'service_health.read') : false;
+  const granted = auth.session?.administrator.permissions;
+  const canReadHealth = hasPermission(granted, 'service_health.read');
+  const canReadCloudUsers = hasPermission(granted, 'cloud_user.read');
+  const canReadCloudDevices = hasPermission(granted, 'cloud_device.read');
   const approvalView = role === 'super_admin' ? 'pending_for_me' : role === 'operator' ? 'mine' : null;
 
   const health = useQuery({
@@ -56,6 +62,20 @@ export function DashboardPage() {
     enabled: Boolean(role && canReadHealth),
     retry: false,
     refetchInterval: 15_000,
+  });
+  const stats = useQuery({
+    queryKey: ['cloud-stats'],
+    queryFn: () => request<CloudStats>('/cloud-stats'),
+    enabled: Boolean(role && canReadCloudUsers),
+    retry: false,
+    refetchInterval: 30_000,
+  });
+  const deviceStats = useQuery({
+    queryKey: ['cloud-device-stats'],
+    queryFn: () => request<CloudDeviceStats>('/cloud-device-stats'),
+    enabled: Boolean(role && canReadCloudDevices),
+    retry: false,
+    refetchInterval: 30_000,
   });
   const approvals = useQuery({
     queryKey: ['approval-requests', approvalView, 'dashboard'],
@@ -146,6 +166,28 @@ export function DashboardPage() {
         description="请求受理、审批通过和 Cloud 执行成功是三个独立状态；不可达或对账中不会显示成功。"
       />
 
+      {canReadCloudUsers && (
+        <Row gutter={[14, 14]} className="overview-grid">
+          {[
+            { title: '用户总数', value: stats.data?.user_total },
+            { title: '有效用户', value: stats.data?.user_active },
+            { title: '已禁用', value: stats.data?.user_disabled },
+            { title: '等待删除', value: stats.data?.user_pending_deletion },
+            { title: '设备总数', value: stats.data?.device_total },
+            { title: '活跃设备', value: stats.data?.device_active },
+          ].map((item) => (
+            <Col xs={12} sm={8} xl={4} key={item.title}>
+              <Card className="overview-card" variant="outlined">
+                <Text type="secondary">{item.title}</Text>
+                <Title level={3}>
+                  {stats.isSuccess ? (item.value ?? 0) : stats.isError ? '—' : '…'}
+                </Title>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
+
       <Row gutter={[14, 14]} className="foundation-grid">
         {foundationCards.map((item) => (
           <Col xs={24} sm={12} xl={6} key={item.title}>
@@ -170,6 +212,25 @@ export function DashboardPage() {
           ]}
         />
       </Card>
+
+      {canReadCloudDevices && (
+        <Card title="设备版本分布" className="device-distribution-card">
+          <Table<CloudDeviceVersionStat>
+            rowKey={(row) => `${row.platform}::${row.app_version}`}
+            loading={deviceStats.isPending}
+            dataSource={deviceStats.data?.buckets ?? []}
+            pagination={false}
+            size="small"
+            locale={{ emptyText: deviceStats.isError ? '设备分布暂时不可用' : '暂无设备' }}
+            columns={[
+              { title: '平台', dataIndex: 'platform', key: 'platform' },
+              { title: 'App 版本', dataIndex: 'app_version', key: 'app_version' },
+              { title: '总数', dataIndex: 'total', key: 'total', align: 'right' },
+              { title: '活跃', dataIndex: 'active', key: 'active', align: 'right' },
+            ]}
+          />
+        </Card>
+      )}
     </div>
   );
 }

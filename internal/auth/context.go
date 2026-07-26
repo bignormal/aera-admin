@@ -9,13 +9,14 @@ import (
 )
 
 type Principal struct {
-	AdminID             string     `json:"admin_id"`
-	SessionID           string     `json:"session_id"`
-	Role                rbac.Role  `json:"role"`
-	SecurityVersion     int64      `json:"security_version"`
-	MFAAuthenticatedAt  time.Time  `json:"mfa_authenticated_at"`
-	TOTPAuthenticatedAt *time.Time `json:"totp_authenticated_at"`
-	MFAMethod           MFAMethod  `json:"mfa_method"`
+	AdminID             string            `json:"admin_id"`
+	SessionID           string            `json:"session_id"`
+	Role                rbac.Role         `json:"role"`
+	Permissions         []rbac.Permission `json:"permissions"`
+	SecurityVersion     int64             `json:"security_version"`
+	MFAAuthenticatedAt  time.Time         `json:"mfa_authenticated_at"`
+	TOTPAuthenticatedAt *time.Time        `json:"totp_authenticated_at"`
+	MFAMethod           MFAMethod         `json:"mfa_method"`
 }
 
 type principalContextKey struct{}

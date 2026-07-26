@@ -40,8 +40,8 @@ interface RequirePermissionProps extends PropsWithChildren {
 export function RequirePermission({ permission, anyOf, children }: RequirePermissionProps) {
   const auth = useAuth();
   if (!auth.session) return <Navigate to="/login" replace />;
-  const role = auth.session.administrator.role;
-  const allowed = permission ? hasPermission(role, permission) : hasAnyPermission(role, anyOf ?? []);
+  const granted = auth.session.administrator.permissions;
+  const allowed = permission ? hasPermission(granted, permission) : hasAnyPermission(granted, anyOf ?? []);
   if (!allowed) {
     return (
       <Result
@@ -64,8 +64,8 @@ interface PermissionGateProps {
 export function PermissionGate({ permission, anyOf, fallback = null, children }: PermissionGateProps) {
   const auth = useAuth();
   if (!auth.session) return fallback;
-  const role = auth.session.administrator.role;
-  const allowed = permission ? hasPermission(role, permission) : hasAnyPermission(role, anyOf ?? []);
+  const granted = auth.session.administrator.permissions;
+  const allowed = permission ? hasPermission(granted, permission) : hasAnyPermission(granted, anyOf ?? []);
   return allowed ? children : fallback;
 }
 

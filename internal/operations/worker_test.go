@@ -313,6 +313,14 @@ func (stub *workerCloudStub) RevokeSession(_ context.Context, _ uuid.UUID, meta 
 	return stub.command(meta)
 }
 
+func (stub *workerCloudStub) RevokeAllSessions(_ context.Context, _ uuid.UUID, meta cloudadmin.CommandMeta) (cloudadmin.Operation, error) {
+	return stub.command(meta)
+}
+
+func (stub *workerCloudStub) ForcePasswordReset(_ context.Context, _ uuid.UUID, meta cloudadmin.CommandMeta) (cloudadmin.Operation, error) {
+	return stub.command(meta)
+}
+
 func (stub *workerCloudStub) DisableUser(_ context.Context, _ uuid.UUID, meta cloudadmin.CommandMeta) (cloudadmin.Operation, error) {
 	return stub.command(meta)
 }

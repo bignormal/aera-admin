@@ -9,13 +9,18 @@ import (
 type Client interface {
 	OfficialAgentClient
 	Health(context.Context) (Health, error)
+	Stats(context.Context) (PlatformStats, error)
+	DeviceStats(context.Context) (DeviceStats, error)
 	ListUsers(context.Context, ListUsersRequest) (Page[User], error)
 	LookupUser(context.Context, LookupRequest) (User, error)
 	GetUser(context.Context, uuid.UUID) (User, error)
+	UserMemberships(context.Context, uuid.UUID) (UserMemberships, error)
 	ListUserDevices(context.Context, uuid.UUID, PageRequest) (Page[Device], error)
 	ListUserSessions(context.Context, uuid.UUID, PageRequest) (Page[Session], error)
 	RevokeDevice(context.Context, uuid.UUID, CommandMeta) (Operation, error)
 	RevokeSession(context.Context, uuid.UUID, CommandMeta) (Operation, error)
+	RevokeAllSessions(context.Context, uuid.UUID, CommandMeta) (Operation, error)
+	ForcePasswordReset(context.Context, uuid.UUID, CommandMeta) (Operation, error)
 	DisableUser(context.Context, uuid.UUID, CommandMeta) (Operation, error)
 	EnableUser(context.Context, uuid.UUID, CommandMeta) (Operation, error)
 	GetOperation(context.Context, uuid.UUID) (Operation, error)
@@ -45,12 +50,24 @@ func (DisabledClient) ListUsers(context.Context, ListUsersRequest) (Page[User], 
 	return Page[User]{}, ErrNotConfigured
 }
 
+func (DisabledClient) Stats(context.Context) (PlatformStats, error) {
+	return PlatformStats{}, ErrNotConfigured
+}
+
+func (DisabledClient) DeviceStats(context.Context) (DeviceStats, error) {
+	return DeviceStats{}, ErrNotConfigured
+}
+
 func (DisabledClient) LookupUser(context.Context, LookupRequest) (User, error) {
 	return User{}, ErrNotConfigured
 }
 
 func (DisabledClient) GetUser(context.Context, uuid.UUID) (User, error) {
 	return User{}, ErrNotConfigured
+}
+
+func (DisabledClient) UserMemberships(context.Context, uuid.UUID) (UserMemberships, error) {
+	return UserMemberships{}, ErrNotConfigured
 }
 
 func (DisabledClient) ListUserDevices(context.Context, uuid.UUID, PageRequest) (Page[Device], error) {
@@ -66,6 +83,14 @@ func (DisabledClient) RevokeDevice(context.Context, uuid.UUID, CommandMeta) (Ope
 }
 
 func (DisabledClient) RevokeSession(context.Context, uuid.UUID, CommandMeta) (Operation, error) {
+	return Operation{}, ErrNotConfigured
+}
+
+func (DisabledClient) RevokeAllSessions(context.Context, uuid.UUID, CommandMeta) (Operation, error) {
+	return Operation{}, ErrNotConfigured
+}
+
+func (DisabledClient) ForcePasswordReset(context.Context, uuid.UUID, CommandMeta) (Operation, error) {
 	return Operation{}, ErrNotConfigured
 }
 

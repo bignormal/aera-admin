@@ -1,5 +1,10 @@
 package rbac
 
+import (
+	"sort"
+	"sync/atomic"
+)
+
 type Role string
 
 const (
@@ -106,47 +111,137 @@ var fixedPermissions = map[Role][]Permission{
 	},
 }
 
-var knownPermissions = func() map[Permission]struct{} {
-	known := make(map[Permission]struct{})
-	for _, permissions := range fixedPermissions {
-		for _, permission := range permissions {
-			known[permission] = struct{}{}
-		}
+// allPermissions is the code-defined permission catalog. Roles may only be
+// granted permissions from this list; new permissions cannot be created at
+// runtime. The order here drives display order and Permissions() ordering.
+var allPermissions = []Permission{
+	ManageAdministrators,
+	ReadAdministrators,
+	ReadCloudUsers,
+	ReadTechnicalUserFields,
+	ExactIdentityLookup,
+	ReadCloudDevices,
+	RevokeCloudSession,
+	RevokeCloudDevice,
+	InitiateAccountLifecycle,
+	ApproveAccountLifecycle,
+	ReadFullAudit,
+	ReadOwnAudit,
+	ReadServiceHealth,
+	ReadSystemSettings,
+	ManageSystemSettings,
+	ReadOfficialAgents,
+	ManageOfficialDrafts,
+	ReviewOfficialAgents,
+	ManageOfficialReleases,
+	RequestOfficialRollback,
+	ApproveOfficialRollback,
+	ReadOfficialAgentAudit,
+}
+
+var permissionCatalog = func() map[Permission]int {
+	catalog := make(map[Permission]int, len(allPermissions))
+	for index, permission := range allPermissions {
+		catalog[permission] = index
 	}
-	known[InitiateAccountLifecycle] = struct{}{}
-	return known
+	return catalog
 }()
 
+// matrix is an immutable snapshot of role -> permission assignments. The active
+// matrix is swapped atomically so that Allowed and friends stay lock-free and
+// every in-flight request observes a consistent view.
+type matrix struct {
+	roles []Role
+	perms map[Role]map[Permission]struct{}
+}
+
+var active atomic.Pointer[matrix]
+
+func init() {
+	SetMatrix(fixedRoles, fixedPermissions)
+}
+
+func buildMatrix(roles []Role, perms map[Role][]Permission) *matrix {
+	snapshot := &matrix{
+		roles: append([]Role(nil), roles...),
+		perms: make(map[Role]map[Permission]struct{}, len(roles)),
+	}
+	for _, role := range roles {
+		snapshot.perms[role] = make(map[Permission]struct{})
+	}
+	for role, list := range perms {
+		set, ok := snapshot.perms[role]
+		if !ok {
+			set = make(map[Permission]struct{})
+			snapshot.perms[role] = set
+		}
+		for _, permission := range list {
+			if _, known := permissionCatalog[permission]; known {
+				set[permission] = struct{}{}
+			}
+		}
+	}
+	return snapshot
+}
+
+// SetMatrix atomically replaces the active role -> permission matrix. Callers
+// pass the ordered set of roles and each role's granted permissions; unknown
+// permissions are dropped so the code-defined catalog stays canonical.
+func SetMatrix(roles []Role, perms map[Role][]Permission) {
+	active.Store(buildMatrix(roles, perms))
+}
+
+func current() *matrix {
+	snapshot := active.Load()
+	if snapshot == nil {
+		snapshot = buildMatrix(fixedRoles, fixedPermissions)
+		active.Store(snapshot)
+	}
+	return snapshot
+}
+
 func (role Role) Valid() bool {
-	_, ok := fixedPermissions[role]
+	_, ok := current().perms[role]
 	return ok
 }
 
 func (permission Permission) Valid() bool {
-	_, ok := knownPermissions[permission]
+	_, ok := permissionCatalog[permission]
 	return ok
 }
 
+// AllPermissions returns the immutable code-defined permission catalog.
+func AllPermissions() []Permission {
+	return append([]Permission(nil), allPermissions...)
+}
+
 func Roles() []Role {
-	return append([]Role(nil), fixedRoles...)
+	return append([]Role(nil), current().roles...)
 }
 
 func Permissions(role Role) []Permission {
-	permissions, ok := fixedPermissions[role]
+	set, ok := current().perms[role]
 	if !ok {
 		return nil
 	}
-	return append([]Permission(nil), permissions...)
+	result := make([]Permission, 0, len(set))
+	for permission := range set {
+		result = append(result, permission)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		return permissionCatalog[result[left]] < permissionCatalog[result[right]]
+	})
+	return result
 }
 
 func Allowed(role Role, permission Permission) bool {
-	if !permission.Valid() {
+	if _, known := permissionCatalog[permission]; !known {
 		return false
 	}
-	for _, candidate := range fixedPermissions[role] {
-		if candidate == permission {
-			return true
-		}
+	set, ok := current().perms[role]
+	if !ok {
+		return false
 	}
-	return false
+	_, allowed := set[permission]
+	return allowed
 }

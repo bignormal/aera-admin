@@ -21,3 +21,7 @@ tmp/
 .env
 .env.*
 !.env.example
+
+# Local one-off development harnesses and generated PKI (contains private keys).
+/.tmp-admin-*.sh
+/.tmp-admin-pki/

@@ -40,6 +40,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 		"admin_invitations",
 		"admin_audit_events",
 		"admin_audit_checkpoints",
+		"admin_roles",
+		"admin_role_permissions",
 		"reason_codes",
 		"admin_security_settings",
 		"admin_settings_idempotency",
@@ -47,7 +49,7 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 		assertTableExists(t, ctx, postgres, table)
 	}
 
-	assertCheckConstraint(t, ctx, postgres, "admin_users", "admin_users_role_check")
+	assertCheckConstraint(t, ctx, postgres, "admin_roles", "admin_roles_slug_check")
 	assertCheckConstraint(t, ctx, postgres, "admin_users", "admin_users_status_check")
 	assertUniqueColumns(t, ctx, postgres, "admin_identities", "admin_identities_lookup_key", []string{"lookup_key_id", "lookup_hmac"})
 	assertColumnType(t, ctx, postgres, "admin_audit_events", "previous_hash", "bytea")
@@ -62,8 +64,8 @@ func TestMigrateCreatesConstrainedSecuritySchema(t *testing.T) {
 	if err := postgres.QueryRow(ctx, `SELECT count(*), max(octet_length(checksum)) FROM schema_migrations`).Scan(&migrationCount, &checksumLength); err != nil {
 		t.Fatalf("read schema migration ledger: %v", err)
 	}
-	if migrationCount != 8 || checksumLength != 32 {
-		t.Fatalf("migration ledger count/checksum length = %d/%d, want 8/32", migrationCount, checksumLength)
+	if migrationCount != 9 || checksumLength != 32 {
+		t.Fatalf("migration ledger count/checksum length = %d/%d, want 9/32", migrationCount, checksumLength)
 	}
 
 	var reasonCodeCount int

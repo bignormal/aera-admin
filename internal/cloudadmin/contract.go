@@ -160,6 +160,84 @@ type Operation struct {
 	UpdatedAt              time.Time       `json:"updated_at"`
 }
 
+// PlatformStats mirrors the aera-cloud admin overview counters. All counts are
+// non-negative and the status buckets never exceed the user total.
+type PlatformStats struct {
+	UserTotal           int64 `json:"user_total"`
+	UserActive          int64 `json:"user_active"`
+	UserDisabled        int64 `json:"user_disabled"`
+	UserPendingDeletion int64 `json:"user_pending_deletion"`
+	DeviceTotal         int64 `json:"device_total"`
+	DeviceActive        int64 `json:"device_active"`
+}
+
+func (stats PlatformStats) Validate() error {
+	counts := []int64{
+		stats.UserTotal, stats.UserActive, stats.UserDisabled,
+		stats.UserPendingDeletion, stats.DeviceTotal, stats.DeviceActive,
+	}
+	for _, count := range counts {
+		if count < 0 {
+			return ErrContractViolation
+		}
+	}
+	if stats.UserActive+stats.UserDisabled+stats.UserPendingDeletion > stats.UserTotal ||
+		stats.DeviceActive > stats.DeviceTotal {
+		return ErrContractViolation
+	}
+	return nil
+}
+
+// DeviceVersionStat is one platform/app-version bucket of the installed base.
+type DeviceVersionStat struct {
+	Platform   string `json:"platform"`
+	AppVersion string `json:"app_version"`
+	Total      int64  `json:"total"`
+	Active     int64  `json:"active"`
+}
+
+// DeviceStats is the aera-cloud device distribution grouped by platform/version.
+type DeviceStats struct {
+	Buckets []DeviceVersionStat `json:"buckets"`
+}
+
+func (stats DeviceStats) Validate() error {
+	for _, bucket := range stats.Buckets {
+		if bucket.Total < 0 || bucket.Active < 0 || bucket.Active > bucket.Total ||
+			utf8.RuneCountInString(bucket.Platform) > 64 || utf8.RuneCountInString(bucket.AppVersion) > 64 {
+			return ErrContractViolation
+		}
+	}
+	return nil
+}
+
+// Membership is one organization or workspace the user belongs to.
+type Membership struct {
+	ID          uuid.UUID `json:"id"`
+	DisplayName string    `json:"display_name"`
+	Role        string    `json:"role"`
+	Status      string    `json:"status"`
+}
+
+// UserMemberships lists the organizations and workspaces a user belongs to.
+type UserMemberships struct {
+	Organizations []Membership `json:"organizations"`
+	Workspaces    []Membership `json:"workspaces"`
+}
+
+func (memberships UserMemberships) Validate() error {
+	for _, group := range [][]Membership{memberships.Organizations, memberships.Workspaces} {
+		for _, item := range group {
+			if item.ID == uuid.Nil || item.DisplayName == "" ||
+				utf8.RuneCountInString(item.DisplayName) > 120 ||
+				utf8.RuneCountInString(item.Role) > 32 || utf8.RuneCountInString(item.Status) > 32 {
+				return ErrContractViolation
+			}
+		}
+	}
+	return nil
+}
+
 func (user User) Validate() error {
 	emailOK := user.MaskedEmail == "" || maskedEmailPattern.MatchString(user.MaskedEmail)
 	phoneOK := user.MaskedPhone == "" || maskedPhonePattern.MatchString(user.MaskedPhone)

@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '../auth/AuthProvider';
+import { rolePermissions } from '../api/contracts';
 import { createAppRouter } from './router';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -50,6 +51,7 @@ describe('application router', () => {
               admin_id: '019f0000-0000-7000-8000-000000000003',
               session_id: '019f0000-0000-7000-8000-000000000004',
               role: 'support',
+              permissions: [...(rolePermissions.support ?? [])],
               security_version: 1,
               mfa_authenticated_at: '2026-07-21T10:00:00Z',
               totp_authenticated_at: '2026-07-21T10:00:00Z',
@@ -354,6 +356,7 @@ function sessionResponse(role: string): Response {
         admin_id: '019f0000-0000-7000-8000-000000000081',
         session_id: '019f0000-0000-7000-8000-000000000082',
         role,
+        permissions: [...(rolePermissions[role] ?? [])],
         security_version: 1,
         mfa_authenticated_at: '2026-07-22T08:00:00Z',
         totp_authenticated_at: '2026-07-22T08:00:00Z',
