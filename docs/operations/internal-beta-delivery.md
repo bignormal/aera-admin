@@ -53,6 +53,8 @@ SHA 和 Cloud SHA 全部通过，候选才可部署。
   issuer/subject/scopes；
 - owner-only PKI 目录，文件名固定为 `ca.pem`、`client.pem`、
   `client-key.pem`、`service-key.pem`；
+- 已由 Cloud 栈创建的外部私有 Docker 网络
+  `aera-cloud-admin-private`，Admin Payload 与 Cloud 8443 监听器只通过该网络互通；
 - `/var/lib/aera/internal-beta/admin`，由部署脚本以 `0700/0600` 记录候选和状态；
 - Docker Compose v2、`cosign`、`jq`、`curl`、`ss`；
 - 能拉取私有 GHCR digest 的只读登录。
@@ -75,8 +77,10 @@ deploy/internal-beta/deploy.sh deploy /protected/admin-candidate/manifest.json
 ```
 
 部署脚本先重新验证候选，按 digest 拉取同一镜像，启动 Payload 和回环网关，再
-检查 Soybean、同源 API、默认写禁用、端口绑定和公开 Cloud origin 不存在
-`/admin/`。失败时只允许恢复已经记录并重新验证过的前一 digest。
+检查 Soybean、同源 API、默认写禁用，并从 Payload 容器使用真实 mTLS 客户端
+证书和 Ed25519 服务 JWT 请求 Cloud 的 `/internal/admin/v1/health`。随后检查
+端口绑定和公开 Cloud origin 不存在 `/admin/`。任何 Cloud 私网、TLS、JWT 或
+暴露面检查失败时，只允许恢复已经记录并重新验证过的前一 digest。
 
 回滚不接收任意 tag、镜像或 manifest：
 

@@ -36,6 +36,7 @@ compose_file=${AERA_INTERNAL_BETA_ADMIN_COMPOSE_FILE:-"$repo_root/deploy/compose
 compose_project=${AERA_INTERNAL_BETA_ADMIN_COMPOSE_PROJECT:-aera-admin-internal-beta}
 verify_command=${AERA_INTERNAL_BETA_ADMIN_VERIFY_COMMAND:-"$repo_root/scripts/release/verify-manifest.sh"}
 health_command=${AERA_INTERNAL_BETA_ADMIN_HEALTH_COMMAND:-"$repo_root/deploy/internal-beta/health-smoke.sh"}
+cloud_health_command=${AERA_INTERNAL_BETA_ADMIN_CLOUD_HEALTH_COMMAND:-"$repo_root/deploy/internal-beta/cloud-smoke.sh"}
 exposure_command=${AERA_INTERNAL_BETA_ADMIN_EXPOSURE_COMMAND:-"$repo_root/deploy/internal-beta/exposure-check.sh"}
 
 require_value AERA_ADMIN_ENV_FILE
@@ -48,6 +49,7 @@ done
 require_file "$compose_file"
 [[ -x $verify_command ]] || fail 'candidate verifier is not executable'
 [[ -x $health_command ]] || fail 'health smoke command is not executable'
+[[ -x $cloud_health_command ]] || fail 'Cloud integration smoke command is not executable'
 [[ -x $exposure_command ]] || fail 'exposure command is not executable'
 
 export AERA_RELEASE_CERTIFICATE_IDENTITY_REGEXP="${AERA_RELEASE_CERTIFICATE_IDENTITY_REGEXP:-^https://github\\.com/bignormal/aera-admin/\\.github/workflows/candidate\\.yml@refs/heads/main$}"
@@ -149,6 +151,8 @@ start_image() {
 check_image() {
   AERA_ADMIN_PRIVATE_PORT="${AERA_ADMIN_PRIVATE_PORT:-19090}" \
     "$health_command" &&
+    AERA_ADMIN_PAYLOAD_CONTAINER="${compose_project}-payload-1" \
+      "$cloud_health_command" &&
     AERA_ADMIN_PRIVATE_PORT="${AERA_ADMIN_PRIVATE_PORT:-19090}" \
       AERA_INTERNAL_BETA_PUBLIC_ORIGIN="${AERA_INTERNAL_BETA_PUBLIC_ORIGIN:-}" \
       "$exposure_command"
