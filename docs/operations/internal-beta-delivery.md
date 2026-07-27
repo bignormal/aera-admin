@@ -9,7 +9,9 @@ standalone 服务、Soybean `/admin/` 静态资源和私有同源网关；部署
 
 内部 Beta 的 Admin 不进入公开 Caddy 路由。网关只发布到
 `127.0.0.1:19090`，测试人员通过 SSH 隧道访问；Payload 的 3000 端口只存在于
-Docker 私有网络。候选默认 `mutationsEnabledByDefault=false`，网关允许读取和
+Docker 私有网络。网关同时连接一个独立的非 internal bridge，以便 Docker
+在宿主机建立回环端口映射；该网络不连接 Payload，且不改变
+`127.0.0.1` 的唯一发布地址。候选默认 `mutationsEnabledByDefault=false`，网关允许读取和
 本地登录/TOTP 生命周期，但对其余非只读 `/api/*` 请求返回
 `MUTATIONS_DISABLED`。在单独评审启用写操作前不得改变这个默认值。
 

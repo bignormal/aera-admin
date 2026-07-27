@@ -60,10 +60,25 @@ require_text .github/workflows/candidate.yml 'AERA_RELEASE_CLOUD_SCHEMA_MAX: "20
 require_text scripts/release/verify-manifest.sh 'cosign verify-attestation'
 require_text scripts/release/verify-manifest.sh 'cosign verify-blob'
 
-AERA_ADMIN_ENV_FILE=/dev/null \
+compose_config=$(AERA_ADMIN_ENV_FILE=/dev/null \
   AERA_ADMIN_PKI_DIR=/tmp \
   AGENTERA_ADMIN_IMAGE_DIGEST=ghcr.io/bignormal/aera-admin@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-  docker compose -f deploy/compose.internal-beta.yaml config >/dev/null
+  docker compose -f deploy/compose.internal-beta.yaml config --format json)
+
+jq -e '
+  .services.gateway.networks["aera-admin-private"] == null and
+  .services.gateway.networks["aera-admin-loopback-publish"] == null and
+  (.services.payload.networks | has("aera-admin-loopback-publish") | not) and
+  .networks["aera-admin-private"].internal == true and
+  (.networks["aera-admin-loopback-publish"].internal // false) == false and
+  any(
+    .services.gateway.ports[];
+    .host_ip == "127.0.0.1" and
+    .published == "19090" and
+    .target == 8080
+  )
+' <<<"$compose_config" >/dev/null ||
+  fail 'gateway loopback publication topology is invalid'
 
 node --test scripts/tests/gateway.test.mjs
 

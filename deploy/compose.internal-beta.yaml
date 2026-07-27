@@ -61,7 +61,9 @@ services:
       AERA_ADMIN_STATIC_ROOT: /app/admin-web-dist
     ports:
       - "127.0.0.1:${AERA_ADMIN_PRIVATE_PORT:-19090}:8080"
-    networks: [aera-admin-private]
+    networks:
+      - aera-admin-private
+      - aera-admin-loopback-publish
     read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,uid=1001,gid=1001"]
     cap_drop: [ALL]
@@ -85,6 +87,7 @@ services:
 networks:
   aera-admin-private:
     internal: true
+  aera-admin-loopback-publish:
   aera-admin-egress:
   aera-cloud-admin-private:
     name: ${AERA_CLOUD_ADMIN_PRIVATE_NETWORK:-aera-cloud-admin-private}
