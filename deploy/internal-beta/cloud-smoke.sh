@@ -30,7 +30,11 @@ function encode(value) {
 
 async function main() {
   const baseURL = new URL(required("AGENTERA_CLOUD_ADMIN_BASE_URL"));
-  if (baseURL.protocol !== "https:" || baseURL.pathname !== "/") {
+  if (
+    baseURL.protocol !== "https:" ||
+    baseURL.port !== "8443" ||
+    baseURL.pathname !== "/"
+  ) {
     throw new Error("Cloud Admin base URL is invalid");
   }
   const scopes = JSON.parse(required("AGENTERA_CLOUD_ADMIN_SCOPES"));
