@@ -23,6 +23,7 @@ for file in \
   deploy/compose.internal-beta.yaml \
   deploy/internal-beta/gateway.mjs \
   deploy/internal-beta/deploy.sh \
+  deploy/internal-beta/cloud-smoke.sh \
   deploy/internal-beta/health-smoke.sh \
   deploy/internal-beta/exposure-check.sh \
   scripts/release/build-manifest.sh \
@@ -41,8 +42,10 @@ require_text deploy/compose.internal-beta.yaml '127\.0\.0\.1:'
 require_text deploy/compose.internal-beta.yaml 'AERA_ADMIN_MUTATIONS_ENABLED:-false'
 require_text deploy/compose.internal-beta.yaml 'read_only: true'
 require_text deploy/compose.internal-beta.yaml 'AERA_ADMIN_PKI_DIR'
+require_text deploy/compose.internal-beta.yaml 'aera-cloud-admin-private'
 require_text deploy/internal-beta/gateway.mjs 'MUTATIONS_DISABLED'
 require_text deploy/internal-beta/deploy.sh 'verify-manifest\.sh'
+require_text deploy/internal-beta/deploy.sh 'cloud-smoke\.sh'
 require_text deploy/internal-beta/deploy.sh 'candidate digest is already current'
 require_text deploy/internal-beta/exposure-check.sh 'loopback-only'
 require_text .github/workflows/candidate.yml 'inputs\.source_sha'
@@ -144,6 +147,13 @@ printf 'health %s\n' "$running" >>"$AERA_ADMIN_DELIVERY_TEST_LOG"
 test "${AERA_ADMIN_DELIVERY_FAIL_IMAGE:-}" != "$running"
 SH
 
+cat >"$tmp/bin/cloud-health" <<'SH'
+#!/bin/sh
+set -eu
+test -n "${AERA_ADMIN_PAYLOAD_CONTAINER:-}"
+printf 'cloud-health\n' >>"$AERA_ADMIN_DELIVERY_TEST_LOG"
+SH
+
 cat >"$tmp/bin/exposure" <<'SH'
 #!/bin/sh
 set -eu
@@ -173,6 +183,7 @@ export AERA_INTERNAL_BETA_ADMIN_COMPOSE_FILE="$tmp/compose.yaml"
 export AERA_INTERNAL_BETA_ADMIN_COMPOSE_PROJECT=aera-admin-delivery-test
 export AERA_INTERNAL_BETA_ADMIN_VERIFY_COMMAND="$tmp/bin/verify"
 export AERA_INTERNAL_BETA_ADMIN_HEALTH_COMMAND="$tmp/bin/health"
+export AERA_INTERNAL_BETA_ADMIN_CLOUD_HEALTH_COMMAND="$tmp/bin/cloud-health"
 export AERA_INTERNAL_BETA_ADMIN_EXPOSURE_COMMAND="$tmp/bin/exposure"
 
 sha_a=$(printf 'a%.0s' {1..40})
@@ -241,5 +252,6 @@ unset AERA_ADMIN_TEST_LISTENER
 
 grep -q "^verify $digest_a$" "$command_log"
 grep -q "^verify $digest_b$" "$command_log"
+grep -q '^cloud-health$' "$command_log"
 grep -q '^exposure$' "$command_log"
 printf 'internal beta Admin delivery tests passed\n'

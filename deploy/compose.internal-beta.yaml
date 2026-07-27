@@ -21,7 +21,10 @@ services:
       - aera-admin-data-internal-beta:/data
       - aera-admin-media-internal-beta:/app/public/media
       - ${AERA_ADMIN_PKI_DIR:?set the owner-only Admin-to-Cloud PKI directory}:/run/aera-admin-pki:ro
-    networks: [aera-admin-private, aera-admin-egress]
+    networks:
+      - aera-admin-private
+      - aera-admin-egress
+      - aera-cloud-admin-private
     read_only: true
     tmpfs:
       - /app/.next/cache:rw,noexec,nosuid,size=64m,uid=1001,gid=1001
@@ -83,6 +86,9 @@ networks:
   aera-admin-private:
     internal: true
   aera-admin-egress:
+  aera-cloud-admin-private:
+    name: ${AERA_CLOUD_ADMIN_PRIVATE_NETWORK:-aera-cloud-admin-private}
+    external: true
 
 volumes:
   aera-admin-data-internal-beta:
