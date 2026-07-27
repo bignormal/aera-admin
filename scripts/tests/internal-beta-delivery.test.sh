@@ -66,13 +66,14 @@ compose_config=$(AERA_ADMIN_ENV_FILE=/dev/null \
   docker compose -f deploy/compose.internal-beta.yaml config --format json)
 
 jq -e '
-  .services.gateway.networks["aera-admin-private"] == null and
-  .services.gateway.networks["aera-admin-loopback-publish"] == null and
+  (.services.gateway.networks | keys | sort) ==
+    ["aera-admin-loopback-publish", "aera-admin-private"] and
   (.services.payload.networks | has("aera-admin-loopback-publish") | not) and
   .networks["aera-admin-private"].internal == true and
   (.networks["aera-admin-loopback-publish"].internal // false) == false and
-  any(
-    .services.gateway.ports[];
+  (.services.gateway.ports | length) == 1 and
+  (
+    .services.gateway.ports[0] |
     .host_ip == "127.0.0.1" and
     .published == "19090" and
     .target == 8080
