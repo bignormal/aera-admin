@@ -64,7 +64,7 @@ describe('audit log domain', () => {
   it('appends an actor, request metadata and redacted before/after values via overrideAccess', async () => {
     const create = vi.fn().mockResolvedValue({ id: 1 })
     const headers = new Headers({
-      'user-agent': 'AgentEra test',
+      'user-agent': 'Aera test',
       'x-forwarded-for': '203.0.113.8, 127.0.0.1',
       'x-request-id': 'req_audit_test',
     })
@@ -98,7 +98,7 @@ describe('audit log domain', () => {
           before: { name: '旧产品' },
           ip: '203.0.113.8',
           requestId: 'req_audit_test',
-          userAgent: 'AgentEra test',
+          userAgent: 'Aera test',
         }),
       }),
     )

@@ -48,7 +48,7 @@ onBeforeUnmount(poller.dispose);
 </script>
 
 <template>
-  <ResourcePageShell title="运营总览" description="聚合并定时刷新 AgentEra API 的吞吐、并发、延迟和错误状态">
+  <ResourcePageShell title="运营总览" description="聚合并定时刷新 Aera API 的吞吐、并发、延迟和错误状态">
     <ResourceState :state="state">
       <template #actions><NButton @click="poller.start">重试</NButton></template>
       <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">

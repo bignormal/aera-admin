@@ -31,7 +31,7 @@ export const IntegrationSettings: CollectionConfig = {
       name: 'service',
       label: '服务',
       type: 'select',
-      options: [{ label: 'AgentEra API', value: 'agentera_api' }],
+      options: [{ label: 'Aera API', value: 'agentera_api' }],
       required: true,
       unique: true,
     },

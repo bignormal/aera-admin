@@ -5,7 +5,7 @@ import { cleanupTestUser, seedTestUser, testUser } from '../helpers/seedUser'
 
 const serverURL = 'http://localhost:3100'
 
-test.describe('AgentEra Admin', () => {
+test.describe('Aera Admin', () => {
   let page: Page
 
   test.beforeAll(async ({ browser }) => {

@@ -45,7 +45,7 @@ function registeredAdminRoutes(source: string): Set<RouteSignature> {
   return routes
 }
 
-describe('AgentEra API operation registry contract', () => {
+describe('Aera API operation registry contract', () => {
   it.skipIf(!upstreamRoot)('maps every allowlisted BFF operation to an existing Go admin route', () => {
     const registered = new Set(
       routeFiles.flatMap((file) => [...registeredAdminRoutes(readFileSync(file, 'utf8'))]),

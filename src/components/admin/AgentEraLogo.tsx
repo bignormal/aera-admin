@@ -3,7 +3,7 @@ import Image from 'next/image'
 export function AgentEraIcon() {
   return (
     <Image
-      alt="AgentEra"
+      alt="Aera"
       className="ae-brand-mark"
       height={30}
       src="/agentera-icon.png"
@@ -16,7 +16,7 @@ export function AgentEraLogo() {
   return (
     <span className="ae-brand" data-testid="agentera-brand">
       <AgentEraIcon />
-      <span>AgentEra 管理系统</span>
+      <span>Aera 管理系统</span>
     </span>
   )
 }

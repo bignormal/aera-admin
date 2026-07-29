@@ -80,7 +80,7 @@ export async function seedCatalog(payload: Payload) {
     avatar = await payload.create({
       collection: 'media',
       data: {
-        alt: 'AgentEra 默认专家头像',
+        alt: 'Aera 默认专家头像',
         attribution: 'agentera-seed:default-avatar',
       },
       file: {

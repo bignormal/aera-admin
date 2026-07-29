@@ -40,7 +40,7 @@ jq -e '
   fail 'Admin readiness or default mutation policy is invalid'
 
 curl "${curl_args[@]}" --fail "$origin/admin/" >"$tmp/admin.html"
-grep -Eq '<title>[^<]*(AgentEra|管理)' "$tmp/admin.html" ||
+grep -Eq '<title>[^<]*(Aera|管理)' "$tmp/admin.html" ||
   fail 'Soybean Admin index was not served'
 
 api_status=$(curl "${curl_args[@]}" \

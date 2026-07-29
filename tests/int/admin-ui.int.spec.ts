@@ -49,4 +49,24 @@ describe('admin UI helpers', () => {
     expect(source).toContain('executeOfficialRollback(row.releaseId, row.approvalId)')
     expect(source).not.toContain('executeOfficialRollback(row.releaseId, row.id)')
   })
+
+  it('keeps every user-visible administration surface on the Aera brand', () => {
+    const visibleFiles = [
+      '../../src/components/admin/AgentEraLogo.tsx',
+      '../../src/components/admin/DashboardOverview.tsx',
+      '../../admin-web/.env',
+      '../../admin-web/src/locales/langs/zh-cn.ts',
+      '../../admin-web/src/views/_builtin/login/index.vue',
+      '../../admin-web/src/views/home/index.vue',
+      '../../admin-web/src/views/agents/index.vue',
+    ]
+
+    for (const relativePath of visibleFiles) {
+      const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8')
+      expect(source, relativePath).toContain('Aera')
+      expect(source, relativePath).not.toMatch(
+        /\b(?:AgentEra|WorkBuddy|AionUI)\b|AgentEra Studio|Hermes (?:Studio|Runtime)/u,
+      )
+    }
+  })
 })

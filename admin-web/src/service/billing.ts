@@ -80,7 +80,7 @@ function parseBillingResource(kind: BillingResourceKind, value: unknown): Billin
     source.order_id ??
     source.code;
   if (!['number', 'string'].includes(typeof id) || (typeof id === 'string' && id.trim() === '')) {
-    throw new ContractError('AgentEra API 商业资源缺少合法 id');
+    throw new ContractError('Aera API 商业资源缺少合法 id');
   }
   return { ...source, id: id as ResourceID };
 }

@@ -39,7 +39,7 @@ before(async () => {
   await mkdir(path.join(staticRoot, 'assets'), { recursive: true })
   await writeFile(
     path.join(staticRoot, 'index.html'),
-    '<!doctype html><title>AgentEra 管理系统</title><div id="app"></div>',
+    '<!doctype html><title>Aera 管理系统</title><div id="app"></div>',
   )
   await writeFile(path.join(staticRoot, 'assets', 'app.js'), 'window.__ADMIN__=true\n')
 
@@ -86,7 +86,7 @@ test('serves Soybean only under /admin with bounded cache policy', async () => {
   assert.equal(redirect.headers.get('location'), '/admin/')
   const index = await fetch(`${origin}/admin/deep/link`)
   assert.equal(index.status, 200)
-  assert.match(await index.text(), /AgentEra 管理系统/u)
+  assert.match(await index.text(), /Aera 管理系统/u)
   assert.equal(index.headers.get('cache-control'), 'no-store')
   const asset = await fetch(`${origin}/admin/assets/app.js`)
   assert.equal(asset.status, 200)

@@ -222,7 +222,7 @@ onBeforeUnmount(resetCharts);
 
 <template>
   <div data-testid="agentera-admin-shell">
-    <ResourcePageShell title="AgentEra 平台总览" description="统一查看 Payload 内容后台、AgentEra API、Aera Cloud 与关键业务指标">
+    <ResourcePageShell title="Aera 平台总览" description="统一查看 Payload 内容后台、Aera API、Aera Cloud 与关键业务指标">
       <template #actions><NButton :loading="loading" @click="load">刷新状态</NButton></template>
       <ResourceState :state="state">
         <template #actions><NButton @click="load">重试</NButton></template>
@@ -242,7 +242,7 @@ onBeforeUnmount(resetCharts);
             <NCard :bordered="false" class="card-wrapper">
               <NSpace vertical :size="12">
                 <div class="flex-y-center justify-between">
-                  <span class="text-16px font-600">AgentEra API / 充值业务</span>
+                  <span class="text-16px font-600">Aera API / 充值业务</span>
                   <NTag :type="apiTagType" :bordered="false">{{ apiLabel }}</NTag>
                 </div>
                 <p class="m-0 text-14px text-gray-500">

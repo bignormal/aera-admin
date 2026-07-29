@@ -84,7 +84,7 @@ function parsePlatformUser(value: unknown): PlatformUser {
     !['admin', 'user'].includes(String(user.role)) ||
     !['active', 'disabled'].includes(String(user.status))
   ) {
-    throw new ContractError('AgentEra API 用户格式不合法');
+    throw new ContractError('Aera API 用户格式不合法');
   }
   return user as PlatformUser;
 }

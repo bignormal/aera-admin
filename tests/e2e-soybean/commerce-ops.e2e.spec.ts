@@ -221,7 +221,7 @@ async function installFixture(page: Page) {
     if (name === 'getSystemSettings')
       return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify(upstream({ maintenance_mode: false, site_name: 'AgentEra' })),
+        body: JSON.stringify(upstream({ maintenance_mode: false, site_name: 'Aera' })),
       })
     if (name === 'getSystemVersion')
       return route.fulfill({

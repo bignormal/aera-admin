@@ -8,7 +8,7 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-describe('live AgentEra API read contracts', () => {
+describe('live Aera API read contracts', () => {
   for (const probe of platformReadProbes) {
     it(`${probe.key} returns the real success envelope and expected shape`, async () => {
       const operation = platformOperations[probe.operation]

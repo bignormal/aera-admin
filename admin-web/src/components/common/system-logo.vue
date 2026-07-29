@@ -3,5 +3,5 @@ const logoUrl = `${import.meta.env.BASE_URL}agentera-icon.png`;
 </script>
 
 <template>
-  <img :src="logoUrl" alt="AgentEra" class="block size-full object-contain" />
+  <img :src="logoUrl" alt="Aera" class="block size-full object-contain" />
 </template>

@@ -26,7 +26,7 @@ test.afterAll(async () => {
   await cleanupTestUser()
 })
 
-test('redirects anonymous administrators to AgentEra login', async ({ page }) => {
+test('redirects anonymous administrators to Aera login', async ({ page }) => {
   await page.goto('/admin/home')
 
   await expect(page).toHaveURL(/\/admin\/login/)
@@ -36,9 +36,9 @@ test('redirects anonymous administrators to AgentEra login', async ({ page }) =>
 test('logs in with Payload and renders the Soybean shell', async ({ page }) => {
   await loginViaUi(page)
 
-  await expect(page.getByTestId('agentera-brand')).toContainText('AgentEra 管理系统')
+  await expect(page.getByTestId('agentera-brand')).toContainText('Aera 管理系统')
   await expect(page.getByTestId('agentera-admin-shell')).toBeVisible()
-  await expect(page.getByText('AgentEra API / 充值业务', { exact: true })).toBeVisible()
+  await expect(page.getByText('Aera API / 充值业务', { exact: true })).toBeVisible()
   await expect(page.getByText('未配置', { exact: true })).toHaveCount(2)
   expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull()
 })

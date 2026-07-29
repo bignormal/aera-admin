@@ -50,7 +50,7 @@ export async function DashboardOverview({ payload, user }: ServerProps) {
       <div className="ae-dashboard__welcome">
         <div>
           <h1>欢迎回来</h1>
-          <p>在这里维护 AgentEra 桌面端使用的官方专家内容。</p>
+          <p>在这里维护 Aera 桌面端使用的官方专家内容。</p>
         </div>
         <span className="ae-dashboard__date">
           {new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long' }).format(new Date())}

@@ -24,7 +24,7 @@ function request(options: {
 }
 
 describe('allowlisted platform BFF', () => {
-  it('registers actual AgentEra API paths, including the real scheduled-test prefix', () => {
+  it('registers actual Aera API paths, including the real scheduled-test prefix', () => {
     expect(platformOperations.listUsers.upstreamPath({})).toBe('/admin/users')
     expect(platformOperations.updateUserBalance.upstreamPath({ id: '8' })).toBe(
       '/admin/users/8/balance',

@@ -21,7 +21,7 @@ const bgColor = computed(() => mixColor('#ffffff', themeStore.themeColor, themeS
         <header class="flex-y-center gap-12px" data-testid="agentera-brand">
           <SystemLogo class="size-56px lt-sm:size-44px" />
           <div>
-            <h1 class="m-0 text-26px text-primary font-600 lt-sm:text-22px">AgentEra 管理系统</h1>
+            <h1 class="m-0 text-26px text-primary font-600 lt-sm:text-22px">Aera 管理系统</h1>
             <p class="mb-0 mt-4px text-13px text-gray-500">平台管理员正式后台</p>
           </div>
         </header>

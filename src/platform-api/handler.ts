@@ -166,7 +166,7 @@ export function createPlatformHandler(
         currentRequestID,
         platformError.status,
         platformError.code,
-        'AgentEra API 管理服务暂时无法完成该操作。',
+        'Aera API 管理服务暂时无法完成该操作。',
       )
     }
   }

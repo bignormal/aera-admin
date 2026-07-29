@@ -17,24 +17,24 @@ export function asResourceRecord(value: unknown): Record<string, unknown> {
     !['number', 'string'].includes(typeof value.id) ||
     (typeof value.id === 'string' && value.id.trim() === '')
   ) {
-    throw new ContractError('AgentEra API 资源缺少合法 id');
+    throw new ContractError('Aera API 资源缺少合法 id');
   }
   return value;
 }
 
 export function asUpstreamRecord(value: unknown): Record<string, unknown> {
   if (!record(value)) {
-    throw new ContractError('AgentEra API 对象格式不合法');
+    throw new ContractError('Aera API 对象格式不合法');
   }
   return value;
 }
 
 export function unwrapUpstream(value: unknown): unknown {
   if (!record(value) || typeof value.code !== 'number' || !('data' in value)) {
-    throw new ContractError('AgentEra API 响应格式不合法');
+    throw new ContractError('Aera API 响应格式不合法');
   }
   if (value.code !== 0) {
-    throw new ContractError(typeof value.message === 'string' ? value.message : 'AgentEra API 返回异常');
+    throw new ContractError(typeof value.message === 'string' ? value.message : 'Aera API 返回异常');
   }
   return value.data;
 }
@@ -45,12 +45,12 @@ export function normalizeUpstreamPage<T>(
   parseItem: (item: unknown) => T
 ): PayloadPage<T> {
   if (!record(value) || !Array.isArray(value.items)) {
-    throw new ContractError('AgentEra API 分页格式不合法');
+    throw new ContractError('Aera API 分页格式不合法');
   }
   const integer = (source: unknown, fallback: number, minimum: number) => {
     const resolved = source === undefined ? fallback : source;
     if (typeof resolved !== 'number' || !Number.isInteger(resolved) || resolved < minimum) {
-      throw new ContractError('AgentEra API 分页元数据不合法');
+      throw new ContractError('Aera API 分页元数据不合法');
     }
     return resolved;
   };
@@ -75,7 +75,7 @@ export function normalizeUpstreamArray<T>(
   parseItem: (item: unknown) => T
 ): PayloadPage<T> {
   if (!Array.isArray(value)) {
-    throw new ContractError('AgentEra API 数组格式不合法');
+    throw new ContractError('Aera API 数组格式不合法');
   }
   return {
     docs: value.map(parseItem),

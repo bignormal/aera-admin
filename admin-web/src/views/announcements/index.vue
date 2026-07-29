@@ -19,7 +19,7 @@ const remove: ResourceDelete = id => deleteBillingResource('announcements', id);
 <template>
   <ResourceCrudPage
     title="公告运营"
-    description="维护充值站和 API 产品的用户公告，数据仍由 AgentEra API 持有"
+    description="维护充值站和 API 产品的用户公告，数据仍由 Aera API 持有"
     :can-write="can('operations:write')"
     :columns="[
       { key: 'title', label: '标题' },

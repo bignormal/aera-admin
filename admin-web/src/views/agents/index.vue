@@ -19,7 +19,7 @@ const remove: ResourceDelete = deleteAgent;
 <template>
   <ResourceCrudPage
     title="官方智能体"
-    description="维护 AgentEra 官方智能体草稿、兼容性与发布版本"
+    description="维护 Aera 官方智能体草稿、兼容性与发布版本"
     :can-write="can('content:agents:write')"
     :can-publish="can('content:agents:publish')"
     :columns="[

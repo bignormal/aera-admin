@@ -8,7 +8,7 @@ const { baseURL } = getServiceBaseURL(import.meta.env, false);
 
 /**
  * Retained only for Soybean's optional dynamic-route API.
- * AgentEra business modules use the native fetch wrapper in `service/http.ts`.
+ * Aera business modules use the native fetch wrapper in `service/http.ts`.
  */
 export const request = createFlatRequest(
   {

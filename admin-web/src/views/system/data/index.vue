@@ -79,7 +79,7 @@ onMounted(loadSchedule);
 <template>
   <ResourcePageShell
     title="数据与备份"
-    description="管理 AgentEra API 的备份任务、备份计划和高危恢复操作"
+    description="管理 Aera API 的备份任务、备份计划和高危恢复操作"
   >
     <NCard :bordered="false" class="card-wrapper mb-16px" title="备份计划">
       <NInput v-model:value="schedule" type="textarea" :rows="8" />

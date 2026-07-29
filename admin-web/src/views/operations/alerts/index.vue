@@ -32,7 +32,7 @@ const eventActions: ResourceRowAction[] = [
 </script>
 
 <template>
-  <ResourcePageShell title="告警中心" description="统一维护告警规则并处理 AgentEra API 产生的告警事件">
+  <ResourcePageShell title="告警中心" description="统一维护告警规则并处理 Aera API 产生的告警事件">
     <NTabs type="line" animated>
       <NTabPane name="rules" tab="告警规则">
         <ResourceCrudPage

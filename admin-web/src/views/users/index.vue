@@ -281,7 +281,7 @@ onBeforeUnmount(() => controller?.abort());
 <template>
   <ResourcePageShell
     title="用户管理"
-    description="平台用户由 AgentEra API 持有；云端用户/设备/会话由 aera-cloud 内部管理 API 持有，本后台统一管控"
+    description="平台用户由 Aera API 持有；云端用户/设备/会话由 aera-cloud 内部管理 API 持有，本后台统一管控"
   >
     <template #actions>
       <NButton v-if="canWrite && activeTab === 'platform'" type="primary" @click="openCreate">创建用户</NButton>

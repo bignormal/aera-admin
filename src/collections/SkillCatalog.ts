@@ -40,7 +40,7 @@ export const SkillCatalog: CollectionConfig = {
     { name: 'description', label: '技能说明', type: 'textarea' },
     {
       name: 'runtimeSkillId',
-      label: 'Hermes Runtime 技能标识',
+      label: 'Aera Runtime 技能标识',
       type: 'text',
       required: true,
     },

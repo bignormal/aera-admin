@@ -1,4 +1,4 @@
-# AgentEra Admin Web
+# Aera Admin Web
 
 ## Local development
 

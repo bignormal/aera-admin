@@ -59,7 +59,7 @@ function sanitizeDiagnostic(value: unknown): OperationalResource {
   const latency = source.latency_ms ?? source.latencyMs;
   const id = (source.id ?? source.request_id ?? source.requestId ?? '') as ResourceID;
   if (!['number', 'string'].includes(typeof id) || id === '') {
-    throw new ContractError('AgentEra API 诊断资源缺少合法 id');
+    throw new ContractError('Aera API 诊断资源缺少合法 id');
   }
   return {
     id,

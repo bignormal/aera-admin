@@ -18,7 +18,7 @@ describe('media service', () => {
   it('uploads a multipart Payload media document without an authorization header', async () => {
     const file = new File(['image'], 'preview.png', { type: 'image/png' });
     vi.mocked(apiRequest).mockResolvedValueOnce({ doc: { id: 6 } });
-    await uploadMedia(file, { alt: 'Aera preview', attribution: 'AgentEra' });
+    await uploadMedia(file, { alt: 'Aera preview', attribution: 'Aera' });
 
     const [path, options] = vi.mocked(apiRequest).mock.calls[0];
     expect(path).toBe('/media');
@@ -27,6 +27,6 @@ describe('media service', () => {
     expect(options?.body).toBeInstanceOf(FormData);
     const body = options?.body as FormData;
     expect(body.get('file')).toBe(file);
-    expect(body.get('_payload')).toBe(JSON.stringify({ alt: 'Aera preview', attribution: 'AgentEra' }));
+    expect(body.get('_payload')).toBe(JSON.stringify({ alt: 'Aera preview', attribution: 'Aera' }));
   });
 });
