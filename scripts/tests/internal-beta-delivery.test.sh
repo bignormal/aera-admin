@@ -56,7 +56,7 @@ require_text .github/workflows/candidate.yml 'docker buildx build'
 require_text .github/workflows/candidate.yml 'cosign sign --yes'
 require_text .github/workflows/candidate.yml 'cosign attest --yes'
 require_text .github/workflows/candidate.yml 'cosign sign-blob --yes'
-require_text .github/workflows/candidate.yml 'AERA_RELEASE_CLOUD_SCHEMA_MAX: "20"'
+require_text .github/workflows/candidate.yml 'AERA_RELEASE_CLOUD_SCHEMA_MAX: "21"'
 require_text scripts/release/verify-manifest.sh 'cosign verify-attestation'
 require_text scripts/release/verify-manifest.sh 'cosign verify-blob'
 

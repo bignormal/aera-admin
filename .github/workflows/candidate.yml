@@ -193,7 +193,7 @@ jobs:
           AERA_RELEASE_ADMIN_HIGHEST_MIGRATION: "1"
           AERA_RELEASE_CLOUD_COMMIT_SHA: ${{ inputs.cloud_source_sha }}
           AERA_RELEASE_CLOUD_SCHEMA_MIN: "17"
-          AERA_RELEASE_CLOUD_SCHEMA_MAX: "20"
+          AERA_RELEASE_CLOUD_SCHEMA_MAX: "21"
           AERA_RELEASE_EXPECTED_SHA: ${{ inputs.source_sha }}
           AERA_RELEASE_EXPECTED_CLOUD_SHA: ${{ inputs.cloud_source_sha }}
           AERA_RELEASE_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com

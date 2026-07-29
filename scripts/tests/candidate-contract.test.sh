@@ -68,7 +68,7 @@ export AERA_RELEASE_ADMIN_SCHEMA_MAX=1
 export AERA_RELEASE_ADMIN_HIGHEST_MIGRATION=1
 export AERA_RELEASE_CLOUD_COMMIT_SHA="$cloud_sha"
 export AERA_RELEASE_CLOUD_SCHEMA_MIN=17
-export AERA_RELEASE_CLOUD_SCHEMA_MAX=20
+export AERA_RELEASE_CLOUD_SCHEMA_MAX=21
 export AERA_RELEASE_CREATED_AT=2026-07-27T00:00:00Z
 export AERA_RELEASE_EXPECTED_SHA="$sha"
 export AERA_RELEASE_EXPECTED_CLOUD_SHA="$cloud_sha"
@@ -109,7 +109,7 @@ jq -e \
       cloudCommitSha: $cloud,
       cloudInternalApiVersion: "v1",
       cloudSchemaMinimum: 17,
-      cloudSchemaMaximum: 20
+      cloudSchemaMaximum: 21
     } and
     .mutationsEnabledByDefault == false
   ' "$evidence/manifest.json" >/dev/null
