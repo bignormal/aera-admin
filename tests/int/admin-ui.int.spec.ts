@@ -42,12 +42,44 @@ describe('admin UI helpers', () => {
 
   it('uses the cloud approval id when executing official Agent rollback', () => {
     const source = readFileSync(
-      new URL('../../admin-web/src/views/publishing/modules/official-agents-panel.vue', import.meta.url),
+      new URL(
+        '../../admin-web/src/views/publishing/modules/official-agents-panel.vue',
+        import.meta.url,
+      ),
       'utf8',
     )
 
     expect(source).toContain('executeOfficialRollback(row.releaseId, row.approvalId)')
     expect(source).not.toContain('executeOfficialRollback(row.releaseId, row.id)')
+  })
+
+  it('separates release and rollback controls by administrator duty', () => {
+    const source = readFileSync(
+      new URL(
+        '../../admin-web/src/views/publishing/modules/official-agents-panel.vue',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+
+    expect(source).toContain(
+      "const canRelease = computed(() => can('official-agents:release:write'))",
+    )
+    expect(source).toContain(
+      "const canRollback = computed(() => can('official-agents:rollback:write'))",
+    )
+    expect(source).toMatch(/canRollback\.value[\s\S]*?openAction\('create-rollback'/)
+    expect(source).toContain("if (!canRollback.value) return '只读'")
+  })
+
+  it('routes every real official Agent duty to the shared workbench', () => {
+    const source = readFileSync(
+      new URL('../../admin-web/src/router/elegant/routes.ts', import.meta.url),
+      'utf8',
+    )
+    const publishingRoute = source.match(/name: 'publishing',[\s\S]*?\n  \},/)?.[0]
+
+    expect(publishingRoute).toContain("capability: 'official-agents:read'")
   })
 
   it('keeps every user-visible administration surface on the Aera brand', () => {

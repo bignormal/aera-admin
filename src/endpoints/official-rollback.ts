@@ -50,7 +50,7 @@ export const officialRollbackEndpoints: Endpoint[] = [
     handler: async (req) => {
       const currentRequestID = requestID(req)
       if (!req.user) return failure(currentRequestID, 401, 'UNAUTHENTICATED', '请先登录管理后台。')
-      if (!hasCapability(req.user.role, 'official-agents:release:write')) {
+      if (!hasCapability(req.user.role, 'official-agents:rollback:write')) {
         return failure(currentRequestID, 403, 'FORBIDDEN', '当前角色无权发起回滚审批。')
       }
       const identity = await cloudIdentityFromRequest(req)
@@ -65,7 +65,8 @@ export const officialRollbackEndpoints: Endpoint[] = [
 
       const body = await requestBody(req)
       const releaseId = typeof body.release_id === 'string' ? body.release_id : ''
-      const targetVersionId = typeof body.target_version_id === 'string' ? body.target_version_id : ''
+      const targetVersionId =
+        typeof body.target_version_id === 'string' ? body.target_version_id : ''
       const targetReleaseRevisionId =
         typeof body.target_release_revision_id === 'string' ? body.target_release_revision_id : ''
       const reasonCode = typeof body.reason_code === 'string' ? body.reason_code : ''
@@ -110,7 +111,7 @@ export const officialRollbackEndpoints: Endpoint[] = [
     handler: async (req) => {
       const currentRequestID = requestID(req)
       if (!req.user) return failure(currentRequestID, 401, 'UNAUTHENTICATED', '请先登录管理后台。')
-      if (!hasCapability(req.user.role, 'official-agents:release:write')) {
+      if (!hasCapability(req.user.role, 'official-agents:rollback:write')) {
         return failure(currentRequestID, 403, 'FORBIDDEN', '当前角色无权审批回滚。')
       }
       const identity = await cloudIdentityFromRequest(req)
@@ -126,7 +127,12 @@ export const officialRollbackEndpoints: Endpoint[] = [
       const body = await requestBody(req)
       const decision = body.decision
       if (decision !== 'approve' && decision !== 'reject') {
-        return failure(currentRequestID, 400, 'INVALID_REQUEST', 'decision 必须为 approve 或 reject。')
+        return failure(
+          currentRequestID,
+          400,
+          'INVALID_REQUEST',
+          'decision 必须为 approve 或 reject。',
+        )
       }
 
       let doc: RollbackDocument
@@ -175,7 +181,7 @@ export const officialRollbackEndpoints: Endpoint[] = [
     handler: async (req) => {
       const currentRequestID = requestID(req)
       if (!req.user) return failure(currentRequestID, 401, 'UNAUTHENTICATED', '请先登录管理后台。')
-      if (!hasCapability(req.user.role, 'official-agents:release:write')) {
+      if (!hasCapability(req.user.role, 'official-agents:rollback:write')) {
         return failure(currentRequestID, 403, 'FORBIDDEN', '当前角色无权取消回滚审批。')
       }
       const identity = await cloudIdentityFromRequest(req)

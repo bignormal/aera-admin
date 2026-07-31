@@ -393,7 +393,7 @@ export const generatedRoutes: GeneratedRoute[] = [
     meta: {
       title: 'publishing',
       i18nKey: 'route.publishing',
-      capability: 'content:publish:read',
+      capability: 'official-agents:read',
       icon: 'mdi:rocket-launch-outline',
       order: 16
     }

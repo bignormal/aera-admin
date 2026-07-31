@@ -52,6 +52,7 @@ const canRead = computed(() => can('official-agents:read'));
 const canDraft = computed(() => can('official-agents:draft:write'));
 const canReview = computed(() => can('official-agents:review:write'));
 const canRelease = computed(() => can('official-agents:release:write'));
+const canRollback = computed(() => can('official-agents:rollback:write'));
 const { onStepUpCancelled, onStepUpVerified, runProtected, showStepUp } = useStepUp();
 
 const loading = ref(false);
@@ -531,50 +532,58 @@ const releaseColumns: DataTableColumns<OfficialRelease> = [
     key: 'actions',
     width: 320,
     render: row =>
-      canRelease.value
+      canRelease.value || canRollback.value
         ? h(NSpace, { size: 8 }, () => [
-            h(
-              NButton,
-              {
-                text: true,
-                type: 'success',
-                onClick: () => openAction('activate-release', '激活发布', { release: row })
-              },
-              () => '激活'
-            ),
-            h(
-              NButton,
-              { text: true, onClick: () => openAction('rollout-release', '调整灰度', { release: row }) },
-              () => '灰度'
-            ),
-            row.state === 'paused'
+            canRelease.value
               ? h(
                   NButton,
                   {
                     text: true,
-                    type: 'info',
-                    onClick: () => openAction('simple-release', '恢复发布', { release: row, releaseAction: 'resume' })
+                    type: 'success',
+                    onClick: () => openAction('activate-release', '激活发布', { release: row })
                   },
-                  () => '恢复'
+                  () => '激活'
                 )
-              : h(
+              : null,
+            canRelease.value
+              ? h(
+                  NButton,
+                  { text: true, onClick: () => openAction('rollout-release', '调整灰度', { release: row }) },
+                  () => '灰度'
+                )
+              : null,
+            canRelease.value
+              ? row.state === 'paused'
+                ? h(
+                    NButton,
+                    {
+                      text: true,
+                      type: 'info',
+                      onClick: () => openAction('simple-release', '恢复发布', { release: row, releaseAction: 'resume' })
+                    },
+                    () => '恢复'
+                  )
+                : h(
+                    NButton,
+                    {
+                      text: true,
+                      type: 'warning',
+                      onClick: () => openAction('simple-release', '暂停发布', { release: row, releaseAction: 'pause' })
+                    },
+                    () => '暂停'
+                  )
+              : null,
+            canRollback.value
+              ? h(
                   NButton,
                   {
                     text: true,
-                    type: 'warning',
-                    onClick: () => openAction('simple-release', '暂停发布', { release: row, releaseAction: 'pause' })
+                    type: 'error',
+                    onClick: () => openAction('create-rollback', '发起回滚审批', { release: row })
                   },
-                  () => '暂停'
-                ),
-            h(
-              NButton,
-              {
-                text: true,
-                type: 'error',
-                onClick: () => openAction('create-rollback', '发起回滚审批', { release: row })
-              },
-              () => '发起回滚'
-            )
+                  () => '发起回滚'
+                )
+              : null
           ])
         : '只读'
   }
@@ -611,7 +620,7 @@ const rollbackColumns: DataTableColumns<RollbackRequest> = [
     key: 'actions',
     width: 240,
     render: row => {
-      if (!canRelease.value) return '只读';
+      if (!canRollback.value) return '只读';
       const buttons: VNodeChild[] = [];
       if (row.status === 'requested') {
         buttons.push(

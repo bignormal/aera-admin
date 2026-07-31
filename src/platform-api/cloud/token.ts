@@ -1,5 +1,7 @@
 import { createPrivateKey, type KeyObject, randomBytes, sign as signRaw } from 'node:crypto'
 
+import { cloudAdminRoles } from '../../access/cloud-actor'
+
 // 逐字段对齐 aera-admin/internal/cloudadmin/token.go 与
 // aera-cloud/internal/adminapi/auth.go 的服务 JWT 契约：
 // EdDSA(Ed25519) + aud=aera-cloud-admin + 5 分钟寿命 + 严格 claim 集合。
@@ -53,6 +55,7 @@ export function parseEd25519PrivateKey(pem: string): KeyObject {
 export function validActorContext(actor: CloudActorContext | undefined): boolean {
   if (!actor) return true
   if (!isCanonicalUUID(actor.adminId)) return false
+  if (!cloudAdminRoles.includes(actor.role as (typeof cloudAdminRoles)[number])) return false
   if (actor.operationId !== undefined && !isCanonicalUUID(actor.operationId)) return false
   if (actor.approvalId !== undefined && !isCanonicalUUID(actor.approvalId)) return false
   if (actor.requesterAdminId !== undefined && !isCanonicalUUID(actor.requesterAdminId)) return false

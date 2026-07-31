@@ -21,11 +21,11 @@ export type CloudMethod = 'GET' | 'PATCH' | 'POST'
 // aera-cloud 的 officialRoleAllowed 强制职责分离：草稿类动作只接受 developer，
 // 审核/回滚只接受 super_admin，发布操作只接受 operator。
 // 本地 capability 是真正的授权门，此处声明的是云端要求的职责角色。
-export type CloudDutyRole = 'developer' | 'operator' | 'super_admin'
+export type CloudRequiredActorRole = 'developer' | 'operator' | 'super_admin'
 
 export type CloudOperation = {
   capability: Capability
-  dutyRole?: CloudDutyRole
+  requiredActorRole?: CloudRequiredActorRole
   kind: CloudOperationKind
   method: CloudMethod
   mutation: boolean
@@ -44,14 +44,14 @@ function cloudOperation(
   params: readonly string[] = [],
   options: Pick<
     CloudOperation,
-    'dutyRole' | 'requiresApproval' | 'requiresReauthentication' | 'risk'
+    'requiredActorRole' | 'requiresApproval' | 'requiresReauthentication' | 'risk'
   > = { risk: 'normal' },
 ): CloudOperation {
   const mutation =
     kind === 'command' || kind === 'official-mutation' || kind === 'official-rollback'
   return {
     capability,
-    dutyRole: options.dutyRole,
+    requiredActorRole: options.requiredActorRole,
     kind,
     method,
     mutation,
@@ -182,7 +182,12 @@ export const cloudOperations = {
     ({ definition_id }) => `/official-agent-definitions/${definition_id}`,
     definitionID,
   ),
-  listOfficialDrafts: cloudOperation('official-read', 'GET', officialRead, '/official-agent-drafts'),
+  listOfficialDrafts: cloudOperation(
+    'official-read',
+    'GET',
+    officialRead,
+    '/official-agent-drafts',
+  ),
   getOfficialDraft: cloudOperation(
     'official-read',
     'GET',
@@ -250,7 +255,7 @@ export const cloudOperations = {
     officialDraftWrite,
     '/official-agent-definitions',
     [],
-    { dutyRole: 'developer', risk: 'normal' },
+    { requiredActorRole: 'developer', risk: 'normal' },
   ),
   createOfficialDraft: cloudOperation(
     'official-mutation',
@@ -258,7 +263,7 @@ export const cloudOperations = {
     officialDraftWrite,
     '/official-agent-drafts',
     [],
-    { dutyRole: 'developer', risk: 'normal' },
+    { requiredActorRole: 'developer', risk: 'normal' },
   ),
   updateOfficialDraft: cloudOperation(
     'official-mutation',
@@ -266,7 +271,7 @@ export const cloudOperations = {
     officialDraftWrite,
     ({ draft_id }) => `/official-agent-drafts/${draft_id}`,
     draftID,
-    { dutyRole: 'developer', risk: 'normal' },
+    { requiredActorRole: 'developer', risk: 'normal' },
   ),
   submitOfficialDraft: cloudOperation(
     'official-mutation',
@@ -274,7 +279,7 @@ export const cloudOperations = {
     officialDraftWrite,
     ({ draft_id }) => `/official-agent-drafts/${draft_id}/submissions`,
     draftID,
-    { dutyRole: 'developer', risk: 'normal' },
+    { requiredActorRole: 'developer', risk: 'normal' },
   ),
   withdrawOfficialSubmission: cloudOperation(
     'official-mutation',
@@ -282,7 +287,7 @@ export const cloudOperations = {
     officialDraftWrite,
     ({ submission_id }) => `/official-agent-submissions/${submission_id}/withdraw`,
     submissionID,
-    { dutyRole: 'developer', risk: 'normal' },
+    { requiredActorRole: 'developer', risk: 'normal' },
   ),
   reviewOfficialSubmission: cloudOperation(
     'official-mutation',
@@ -290,7 +295,7 @@ export const cloudOperations = {
     officialReviewWrite,
     ({ submission_id }) => `/official-agent-submissions/${submission_id}/reviews`,
     submissionID,
-    { dutyRole: 'super_admin', risk: 'important' },
+    { requiredActorRole: 'super_admin', risk: 'important' },
   ),
 
   // ---- 官方 Agent 发布 ----
@@ -300,7 +305,7 @@ export const cloudOperations = {
     officialReleaseWrite,
     ({ release_id }) => `/official-agent-releases/${release_id}/activate`,
     releaseID,
-    { dutyRole: 'operator', risk: 'important' },
+    { requiredActorRole: 'operator', risk: 'important' },
   ),
   rolloutOfficialRelease: cloudOperation(
     'official-mutation',
@@ -308,7 +313,7 @@ export const cloudOperations = {
     officialReleaseWrite,
     ({ release_id }) => `/official-agent-releases/${release_id}/rollout`,
     releaseID,
-    { dutyRole: 'operator', risk: 'important' },
+    { requiredActorRole: 'operator', risk: 'important' },
   ),
   pauseOfficialRelease: cloudOperation(
     'official-mutation',
@@ -316,7 +321,7 @@ export const cloudOperations = {
     officialReleaseWrite,
     ({ release_id }) => `/official-agent-releases/${release_id}/pause`,
     releaseID,
-    { dutyRole: 'operator', risk: 'important' },
+    { requiredActorRole: 'operator', risk: 'important' },
   ),
   resumeOfficialRelease: cloudOperation(
     'official-mutation',
@@ -324,15 +329,15 @@ export const cloudOperations = {
     officialReleaseWrite,
     ({ release_id }) => `/official-agent-releases/${release_id}/resume`,
     releaseID,
-    { dutyRole: 'operator', risk: 'important' },
+    { requiredActorRole: 'operator', risk: 'important' },
   ),
   rollbackOfficialRelease: cloudOperation(
     'official-rollback',
     'POST',
-    officialReleaseWrite,
+    'official-agents:rollback:write',
     ({ release_id }) => `/official-agent-releases/${release_id}/rollback`,
     releaseID,
-    { dutyRole: 'super_admin', requiresReauthentication: true, risk: 'high' },
+    { requiredActorRole: 'super_admin', requiresReauthentication: true, risk: 'high' },
   ),
 } satisfies Record<string, CloudOperation>
 

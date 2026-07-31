@@ -30,8 +30,35 @@ describe('Soybean platform capability guards', () => {
     expect(can('users:balance:update')).toBe(false);
   });
 
+  it('matches official Agent controls to Cloud duty roles', () => {
+    const rollbackCapability = 'official-agents:rollback:write';
+    const expected = {
+      auditor: [true, false, false, false, false],
+      operations_admin: [true, false, false, true, false],
+      publisher: [true, true, false, false, false],
+      super_admin: [true, false, true, false, true]
+    } as const;
+
+    for (const [role, permissions] of Object.entries(expected)) {
+      authState.userInfo.role = role as Api.Auth.AdminRole;
+      const { can } = useCapability();
+      expect(
+        [
+          can('official-agents:read'),
+          can('official-agents:draft:write'),
+          can('official-agents:review:write'),
+          can('official-agents:release:write'),
+          can(rollbackCapability)
+        ],
+        role
+      ).toEqual(permissions);
+    }
+  });
+
   it('resolves direct navigation without the route capability to 403', () => {
-    expect(getCapabilityRouteRedirect('finance_admin', 'content:agents:write')).toEqual({ name: '403' });
+    expect(getCapabilityRouteRedirect('finance_admin', 'content:agents:write')).toEqual({
+      name: '403'
+    });
     expect(getCapabilityRouteRedirect('publisher', 'content:agents:write')).toBeNull();
   });
 });
