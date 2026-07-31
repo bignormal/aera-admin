@@ -1,129 +1,36 @@
 import { callCloud } from './cloud';
+import type { components } from './generated/cloud-admin';
 import { ApiError, apiRequest } from './http';
 
-// 官方 Agent 生命周期契约，对齐 aera-cloud/internal/adminapi/official_agent.go。
-export type OfficialDefinition = {
-  created_at: string;
-  created_by_admin_id: string;
-  definition_id: string;
-  display_name: string;
-  icon_media_type?: string;
-  latest_version_id?: string;
-  platform_id: string;
-  status: string;
-  updated_at: string;
-};
+type CloudSchemas = components['schemas'];
 
-export type OfficialDraft = {
-  base_version_id?: string;
-  bundle: Record<string, unknown>;
-  bundle_digest: string;
-  content_digest: string;
-  created_at: string;
-  definition_id: string;
-  display_name: string;
-  draft_id: string;
-  kind: string;
-  last_editor_admin_id: string;
-  last_editor_role: string;
-  manifest: Record<string, unknown>;
-  manifest_digest: string;
-  platform_id: string;
-  revision: number;
-  status: string;
-  updated_at: string;
-};
-
-export type OfficialSubmission = {
-  content_digest: string;
-  definition_id: string;
-  display_name: string;
-  draft_id: string;
-  draft_revision: number;
-  kind: string;
-  review?: {
-    decision: string;
-    reason_code?: string;
-    reviewed_at: string;
-    reviewer_admin_id: string;
-    reviewer_role: string;
-    safe_note?: string;
-  };
-  revision: number;
-  status: string;
-  submission_id: string;
-  submitted_at: string;
-  submitted_by_admin_id: string;
-  submitted_by_role: string;
-  terminal_at?: string;
-  updated_at: string;
-};
-
-export type OfficialVersion = {
-  content_digest: string;
-  definition_id: string;
-  published_at: string;
-  runtime_minimum_version: string;
-  version_id: string;
-  version_number: number;
-};
-
-export type OfficialRelease = {
-  action: string;
-  actor_admin_id: string;
-  actor_admin_role: string;
-  agent_version_id: string;
-  audience_count: number;
-  channel: string;
-  created_at: string;
-  current_revision_id: string;
-  definition_id: string;
-  head_revision: number;
-  minimum_desktop_version: string;
-  platform_id: string;
-  reason_code: string;
-  release_id: string;
-  rollback_target_revision_id?: string;
-  rollout_basis_points: number;
-  state: string;
-  updated_at: string;
-};
-
-export type OfficialAgentAuditEvent = {
-  action: string;
-  actor_admin_id?: string;
-  actor_admin_role?: string;
-  audit_event_id?: string;
-  created_at: string;
-  definition_id?: string;
-  draft_id?: string;
-  operation_id?: string;
-  reason_code?: string;
-  release_id?: string;
-  resource_id?: string;
-  resource_type?: string;
-  submission_id?: string;
-  [key: string]: unknown;
-};
+// Cloud OpenAPI 是官方 Agent wire contract 的唯一类型来源。
+export type OfficialDefinition = CloudSchemas['OfficialDefinition'];
+export type OfficialDraft = CloudSchemas['OfficialDraft'];
+export type OfficialSubmission = CloudSchemas['OfficialSubmission'];
+export type OfficialVersion = CloudSchemas['OfficialVersion'];
+export type OfficialRelease = CloudSchemas['OfficialRelease'];
+export type OfficialAgentAuditEvent = CloudSchemas['OfficialAuditEvent'];
+export type OfficialReviewDecision = CloudSchemas['OfficialReview']['decision'];
+export type AgentManifestV1 = CloudSchemas['AgentManifestV1'];
+export type AgentVersionBundleV1 = CloudSchemas['AgentVersionBundleV1'];
+export type OfficialReleaseChannel = NonNullable<
+  CloudSchemas['OfficialReviewMutation']['payload']['initial_channels']
+>[number];
 
 export type OfficialPage<T> = {
   items: T[];
   next_cursor?: string;
 };
 
-export type OfficialOperationOutcome = {
-  operation_id: string;
-  [key: string]: unknown;
-};
-
-export type DraftValidation = {
-  content_digest: string;
-  dlp_version: string;
-  draft_id: string;
-  draft_revision: number;
-  findings: Array<Record<string, unknown>>;
-  valid: boolean;
-};
+export type OfficialOperationOutcome = CloudSchemas['Operation'];
+export type DraftValidation = CloudSchemas['OfficialDraftValidation'];
+export type OfficialDefinitionPayload = CloudSchemas['OfficialDefinitionMutation']['payload'];
+export type OfficialDraftCreatePayload = CloudSchemas['OfficialDraftCreatePayload'];
+export type OfficialDraftUpdatePayload = CloudSchemas['OfficialDraftUpdatePayload'];
+export type OfficialReviewPayload = CloudSchemas['OfficialReviewMutation']['payload'];
+export type OfficialActivatePayload = CloudSchemas['OfficialActivateMutation']['payload'];
+export type OfficialRolloutPayload = CloudSchemas['OfficialRolloutMutation']['payload'];
 
 // 官方 Agent 变更统一入参：BFF 会包装成 officialMutationEnvelope 并生成 operation_id。
 export type OfficialMutationInput<T = Record<string, unknown>> = {
@@ -136,11 +43,11 @@ export type OfficialMutationInput<T = Record<string, unknown>> = {
 type PageQuery = { cursor?: string; limit?: number };
 
 async function listOfficial<T>(operation: string, query: PageQuery, signal?: AbortSignal): Promise<OfficialPage<T>> {
-  const result = await callCloud<OfficialPage<T>>(operation, {
+  const result = await callCloud<{ readonly items: readonly T[]; readonly next_cursor?: string }>(operation, {
     params: { cursor: query.cursor, limit: query.limit },
     signal
   });
-  return result.data;
+  return { ...result.data, items: [...result.data.items] };
 }
 
 export const listOfficialDefinitions = (query: PageQuery = {}, signal?: AbortSignal) =>
@@ -170,7 +77,7 @@ export async function validateOfficialDraft(draftId: string): Promise<DraftValid
 }
 
 export async function reserveOfficialDefinition(
-  input: OfficialMutationInput<{ display_name: string }>
+  input: OfficialMutationInput<OfficialDefinitionPayload>
 ): Promise<OfficialOperationOutcome> {
   const result = await callCloud<OfficialOperationOutcome>('reserveOfficialDefinition', {
     method: 'POST',
@@ -179,14 +86,16 @@ export async function reserveOfficialDefinition(
   return result.data;
 }
 
-export async function createOfficialDraft(input: OfficialMutationInput): Promise<OfficialOperationOutcome> {
+export async function createOfficialDraft(
+  input: OfficialMutationInput<OfficialDraftCreatePayload>
+): Promise<OfficialOperationOutcome> {
   const result = await callCloud<OfficialOperationOutcome>('createOfficialDraft', { method: 'POST', body: input });
   return result.data;
 }
 
 export async function updateOfficialDraft(
   draftId: string,
-  input: OfficialMutationInput
+  input: OfficialMutationInput<OfficialDraftUpdatePayload>
 ): Promise<OfficialOperationOutcome> {
   const result = await callCloud<OfficialOperationOutcome>('updateOfficialDraft', {
     method: 'PATCH',
@@ -222,12 +131,7 @@ export async function withdrawOfficialSubmission(
 
 export async function reviewOfficialSubmission(
   submissionId: string,
-  input: OfficialMutationInput<{
-    decision: 'approved' | 'rejected';
-    initial_channels?: string[];
-    review_reason_code?: string;
-    safe_note?: string;
-  }>
+  input: OfficialMutationInput<OfficialReviewPayload>
 ): Promise<OfficialOperationOutcome> {
   const result = await callCloud<OfficialOperationOutcome>('reviewOfficialSubmission', {
     method: 'POST',
@@ -239,12 +143,7 @@ export async function reviewOfficialSubmission(
 
 export async function activateOfficialRelease(
   releaseId: string,
-  input: OfficialMutationInput<{
-    allowlisted_user_ids?: string[];
-    minimum_desktop_version: string;
-    rollout_basis_points: number;
-    version_id: string;
-  }>
+  input: OfficialMutationInput<OfficialActivatePayload>
 ): Promise<OfficialOperationOutcome> {
   const result = await callCloud<OfficialOperationOutcome>('activateOfficialRelease', {
     method: 'POST',
@@ -256,11 +155,7 @@ export async function activateOfficialRelease(
 
 export async function rolloutOfficialRelease(
   releaseId: string,
-  input: OfficialMutationInput<{
-    allowlisted_user_ids?: string[];
-    minimum_desktop_version: string;
-    rollout_basis_points: number;
-  }>
+  input: OfficialMutationInput<OfficialRolloutPayload>
 ): Promise<OfficialOperationOutcome> {
   const result = await callCloud<OfficialOperationOutcome>('rolloutOfficialRelease', {
     method: 'POST',
