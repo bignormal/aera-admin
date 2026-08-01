@@ -65,7 +65,7 @@ describe('official Agent draft forms', () => {
     ).toEqual({ ok: false, error: '版本更新草稿必须填写基础版本 ID' });
   });
 
-  it('accepts every canonical V2 model policy mode', () => {
+  it('accepts every canonical V2 model policy mode for create and update', () => {
     for (const modelPolicy of [
       { allowed_models: [], allowed_providers: [], mode: 'user_select' },
       {
@@ -89,7 +89,51 @@ describe('official Agent draft forms', () => {
           manifestJSON: JSON.stringify(candidate)
         })
       ).toMatchObject({ ok: true, payload: { manifest: candidate } });
+      expect(
+        buildOfficialDraftCreatePayload({
+          baseVersionId: '',
+          bundleJSON: JSON.stringify(bundle),
+          definitionId: 'definition-1',
+          displayName: 'Example Agent',
+          kind: 'initial',
+          manifestJSON: JSON.stringify(candidate)
+        })
+      ).toMatchObject({
+        ok: true,
+        payload: { definition_id: 'definition-1', manifest: candidate }
+      });
     }
+  });
+
+  it('enforces the V2 route-count boundary', () => {
+    const candidateForCount = (count: number) => ({
+      ...manifestV2,
+      model_policy: {
+        allowed_models: Array.from({ length: count }, (_, index) => `model-${index}`),
+        allowed_providers: Array.from({ length: count }, (_, index) => `provider-${index}`),
+        mode: 'allowlist'
+      }
+    });
+    const acceptedCandidate = candidateForCount(128);
+    expect(
+      buildOfficialDraftUpdatePayload({
+        baseVersionId: '',
+        bundleJSON: JSON.stringify(bundle),
+        displayName: 'Example Agent',
+        kind: 'initial',
+        manifestJSON: JSON.stringify(acceptedCandidate)
+      })
+    ).toMatchObject({ ok: true, payload: { manifest: acceptedCandidate } });
+
+    expect(
+      buildOfficialDraftUpdatePayload({
+        baseVersionId: '',
+        bundleJSON: JSON.stringify(bundle),
+        displayName: 'Example Agent',
+        kind: 'initial',
+        manifestJSON: JSON.stringify(candidateForCount(129))
+      })
+    ).toEqual({ ok: false, error: 'Manifest 不符合 AgentManifest V1/V2 结构' });
   });
 
   it('does not apply the V2 route-count limit to a V1 manifest', () => {
