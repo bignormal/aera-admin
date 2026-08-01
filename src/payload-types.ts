@@ -383,7 +383,8 @@ export interface AuditLog {
     | 'official-agents:read'
     | 'official-agents:draft:write'
     | 'official-agents:review:write'
-    | 'official-agents:release:write';
+    | 'official-agents:release:write'
+    | 'official-agents:rollback:write';
   action: string;
   resourceType: string;
   resourceId?: string | null;

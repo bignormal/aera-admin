@@ -57,6 +57,7 @@ export const capabilities = [
   'official-agents:draft:write',
   'official-agents:review:write',
   'official-agents:release:write',
+  'official-agents:rollback:write',
 ] as const
 
 export type Capability = (typeof capabilities)[number]
@@ -70,7 +71,12 @@ export const adminRoleLabels: Record<AdminRole, string> = {
 }
 
 export const roleCapabilities: Record<AdminRole, readonly Capability[]> = {
-  super_admin: capabilities,
+  super_admin: [
+    ...capabilities.filter((capability) => !capability.startsWith('official-agents:')),
+    'official-agents:read',
+    'official-agents:review:write',
+    'official-agents:rollback:write',
+  ],
   operations_admin: [
     'auth:session',
     'dashboard:read',
@@ -93,6 +99,7 @@ export const roleCapabilities: Record<AdminRole, readonly Capability[]> = {
     'cloud:devices:write',
     'cloud:sessions:write',
     'official-agents:read',
+    'official-agents:release:write',
   ],
   publisher: [
     'auth:session',
@@ -117,8 +124,6 @@ export const roleCapabilities: Record<AdminRole, readonly Capability[]> = {
     'content:publish:execute',
     'official-agents:read',
     'official-agents:draft:write',
-    'official-agents:review:write',
-    'official-agents:release:write',
   ],
   finance_admin: [
     'auth:session',

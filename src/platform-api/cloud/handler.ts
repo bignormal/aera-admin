@@ -151,12 +151,9 @@ async function prepareUpstream(
         }
       }
       const operationId = randomUUID()
-      // 云端按动作强制职责角色（developer/operator/super_admin），
-      // 本地 capability 已完成授权，此处按注册表声明的职责角色签发。
-      const dutyRole = operation.dutyRole ?? identity.cloudRole
       const envelope: Record<string, unknown> = {
         actor_admin_id: identity.adminUUID,
-        actor_admin_role: dutyRole,
+        actor_admin_role: identity.cloudRole,
         expected_revision: revision,
         operation_id: operationId,
         payload: body.payload ?? {},
@@ -168,7 +165,7 @@ async function prepareUpstream(
         actor: {
           adminId: identity.adminUUID,
           operationId,
-          role: dutyRole,
+          role: identity.cloudRole,
         },
         body: envelope,
         idempotencyKey: operationId,
@@ -240,10 +237,9 @@ async function prepareUpstream(
         }
       }
       const operationId = randomUUID()
-      const rollbackDutyRole = operation.dutyRole ?? identity.cloudRole
       const envelope: Record<string, unknown> = {
         actor_admin_id: identity.adminUUID,
-        actor_admin_role: rollbackDutyRole,
+        actor_admin_role: identity.cloudRole,
         approval_id: approvalId,
         expected_revision: revision,
         operation_id: operationId,
@@ -262,7 +258,7 @@ async function prepareUpstream(
           approvalId,
           operationId,
           requesterAdminId: requesterActorId,
-          role: rollbackDutyRole,
+          role: identity.cloudRole,
         },
         body: envelope,
         idempotencyKey: operationId,
@@ -332,7 +328,9 @@ async function auditCloudMutation(
   }
 }
 
-export function createCloudHandler(upstream: CloudUpstreamRequester = requestCloudUpstream): PayloadHandler {
+export function createCloudHandler(
+  upstream: CloudUpstreamRequester = requestCloudUpstream,
+): PayloadHandler {
   return async (req) => {
     const currentRequestID = requestID(req)
     if (!req.user) {
@@ -350,6 +348,24 @@ export function createCloudHandler(upstream: CloudUpstreamRequester = requestClo
     if (requestMethod(req) !== operation.method) {
       return failure(currentRequestID, 405, 'METHOD_NOT_ALLOWED', '请求方法与已注册操作不匹配。')
     }
+    const identity = await cloudIdentityFromRequest(req)
+    if (!identity) {
+      return failure(
+        currentRequestID,
+        409,
+        'CLOUD_ACTOR_MISSING',
+        '当前管理员还没有云 actor 标识，请重新登录后重试。',
+      )
+    }
+    if (operation.requiredActorRole && identity.cloudRole !== operation.requiredActorRole) {
+      return failure(
+        currentRequestID,
+        403,
+        'ACTOR_DUTY_MISMATCH',
+        '当前管理员职责与云端操作不匹配。',
+      )
+    }
+
     if (operation.requiresReauthentication) {
       const stepUp = await assertRecentStepUp(req)
       if (!stepUp.ok) {
@@ -359,16 +375,6 @@ export function createCloudHandler(upstream: CloudUpstreamRequester = requestClo
             : '该高风险操作需要重新完成 TOTP 二次验证。'
         return failure(currentRequestID, 428, stepUp.errorCode, message)
       }
-    }
-
-    const identity = await cloudIdentityFromRequest(req)
-    if (!identity) {
-      return failure(
-        currentRequestID,
-        409,
-        'CLOUD_ACTOR_MISSING',
-        '当前管理员还没有云 actor 标识，请重新登录后重试。',
-      )
     }
 
     const url = new URL(req.url || 'http://localhost')

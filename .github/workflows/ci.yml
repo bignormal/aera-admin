@@ -41,6 +41,8 @@ jobs:
         run: |
           bash scripts/tests/candidate-contract.test.sh
           bash scripts/tests/internal-beta-delivery.test.sh
+      - name: Verify Cloud Internal Admin contract mirror and generated types
+        run: pnpm run check:cloud-admin-contract
       - name: Lint Payload
         run: pnpm lint
       - name: Test Payload integration contracts

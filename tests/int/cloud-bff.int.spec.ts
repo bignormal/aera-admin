@@ -3,10 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createCloudHandler } from '../../src/platform-api/cloud/handler'
 import { getCloudAdminConfig } from '../../src/platform-api/cloud/config'
-import {
-  cloudOperations,
-  type CloudOperation,
-} from '../../src/platform-api/cloud/operations'
+import { cloudOperations, type CloudOperation } from '../../src/platform-api/cloud/operations'
 import { createTokenSource, validActorContext } from '../../src/platform-api/cloud/token'
 
 const registry = cloudOperations as Record<string, CloudOperation>
@@ -124,10 +121,18 @@ describe('cloud service JWT', () => {
   it('rejects invalid actor contexts before signing', () => {
     expect(validActorContext({ adminId: 'not-a-uuid', role: 'operator' })).toBe(false)
     expect(
-      validActorContext({ adminId, approvalId, operationId, requesterAdminId: adminId, role: 'operator' }),
+      validActorContext({
+        adminId,
+        approvalId,
+        operationId,
+        requesterAdminId: adminId,
+        role: 'operator',
+      }),
     ).toBe(false)
     expect(validActorContext({ adminId, approvalId, role: 'operator' })).toBe(false)
+    expect(validActorContext({ adminId, role: 'root' })).toBe(false)
     expect(() => source.token({ adminId: 'broken', role: 'operator' })).toThrow()
+    expect(() => source.token({ adminId, role: 'root' })).toThrow()
   })
 })
 
@@ -152,13 +157,23 @@ describe('cloud operation registry', () => {
       risk: 'high',
     })
     expect(registry.rollbackOfficialRelease).toMatchObject({
-      capability: 'official-agents:release:write',
+      capability: 'official-agents:rollback:write',
       kind: 'official-rollback',
+      requiredActorRole: 'super_admin',
       requiresReauthentication: true,
       risk: 'high',
     })
     expect(registry.disableCloudUser.requiresApproval).toBe(true)
     expect(registry.enableCloudUser.requiresApproval).toBe(true)
+  })
+
+  it('declares required Cloud roles without carrying an actor role override', () => {
+    expect(registry.reserveOfficialDefinition).toMatchObject({ requiredActorRole: 'developer' })
+    expect(registry.reviewOfficialSubmission).toMatchObject({ requiredActorRole: 'super_admin' })
+    expect(registry.activateOfficialRelease).toMatchObject({ requiredActorRole: 'operator' })
+    for (const operation of Object.values(cloudOperations)) {
+      expect(operation).not.toHaveProperty('dutyRole')
+    }
   })
 
   it('keeps reads free of mutation flags', () => {
@@ -317,6 +332,64 @@ describe('cloud BFF handler', () => {
     expect(call.idempotencyKey).toBe(call.body.operation_id)
   })
 
+  it('rejects capability and Cloud duty mismatches without forging actor roles', async () => {
+    const upstream = vi.fn().mockResolvedValue({ data: { operation_id: 'op-1' } })
+    const handler = createCloudHandler(upstream)
+    const cases = [
+      {
+        operation: 'reserveOfficialDefinition',
+        role: 'publisher',
+        status: 200,
+        cloudRole: 'developer',
+      },
+      {
+        operation: 'activateOfficialRelease',
+        role: 'operations_admin',
+        status: 200,
+        cloudRole: 'operator',
+      },
+      {
+        operation: 'reviewOfficialSubmission',
+        role: 'super_admin',
+        status: 200,
+        cloudRole: 'super_admin',
+      },
+      { operation: 'reviewOfficialSubmission', role: 'publisher', status: 403 },
+      { operation: 'reserveOfficialDefinition', role: 'operations_admin', status: 403 },
+      { operation: 'reserveOfficialDefinition', role: 'super_admin', status: 403 },
+      { operation: 'activateOfficialRelease', role: 'super_admin', status: 403 },
+      { operation: 'reserveOfficialDefinition', role: 'auditor', status: 403 },
+    ] as const
+
+    for (const test of cases) {
+      upstream.mockClear()
+      const pathParam =
+        test.operation === 'reviewOfficialSubmission'
+          ? `?submission_id=${actorUUID}`
+          : test.operation === 'activateOfficialRelease'
+            ? `?release_id=${actorUUID}`
+            : ''
+      const response = await handler(
+        handlerRequest({
+          body: { expected_revision: 1, payload: {}, reason_code: 'duty_check' },
+          method: 'POST',
+          operation: test.operation,
+          query: pathParam,
+          role: test.role,
+        }) as never,
+      )
+
+      expect(response.status, `${test.role}:${test.operation}`).toBe(test.status)
+      if (test.status === 200) {
+        const call = upstream.mock.calls[0][0]
+        expect(call.actor.role).toBe(test.cloudRole)
+        expect(call.body.actor_admin_role).toBe(test.cloudRole)
+      } else {
+        expect(upstream).not.toHaveBeenCalled()
+      }
+    }
+  })
+
   it('blocks high-risk operations with 428 until a recent step-up exists', async () => {
     const upstream = vi.fn()
     const handler = createCloudHandler(upstream)
@@ -441,13 +514,15 @@ describe('cloud BFF handler', () => {
     const selfExecution = await handler(
       handlerRequest({
         body: { approval_request_id: 42 },
-        findByID: vi.fn().mockImplementation(({ collection }: { collection: string }) =>
-          Promise.resolve(
-            collection === 'admins'
-              ? admins
-              : { ...base, decidedByActorId: actorUUID, requestedByActorId: actorUUID },
+        findByID: vi
+          .fn()
+          .mockImplementation(({ collection }: { collection: string }) =>
+            Promise.resolve(
+              collection === 'admins'
+                ? admins
+                : { ...base, decidedByActorId: actorUUID, requestedByActorId: actorUUID },
+            ),
           ),
-        ),
         method: 'POST',
         operation: 'rollbackOfficialRelease',
         query: `?release_id=${releaseUUID}`,

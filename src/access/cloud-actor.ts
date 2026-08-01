@@ -6,7 +6,18 @@ import { type AdminRole, isAdminRole } from './capabilities'
 // aera-cloud 的 allowedOfficialRoles 为
 // {super_admin, developer, operator, support, finance, auditor}，
 // 此处将本地管理员角色映射到云端认可的服务角色。
-const cloudRoleByAdminRole: Record<AdminRole, string> = {
+export const cloudAdminRoles = [
+  'super_admin',
+  'developer',
+  'operator',
+  'support',
+  'finance',
+  'auditor',
+] as const
+
+export type CloudAdminRole = (typeof cloudAdminRoles)[number]
+
+const cloudRoleByAdminRole: Record<AdminRole, CloudAdminRole> = {
   super_admin: 'super_admin',
   operations_admin: 'operator',
   publisher: 'developer',
@@ -16,7 +27,7 @@ const cloudRoleByAdminRole: Record<AdminRole, string> = {
 
 export type CloudAdminIdentity = {
   adminUUID: string
-  cloudRole: string
+  cloudRole: CloudAdminRole
   role: AdminRole
 }
 

@@ -33,10 +33,17 @@ import {
   type OfficialDefinition,
   type OfficialDraft,
   type OfficialRelease,
+  type OfficialReleaseChannel,
+  type OfficialReviewDecision,
   type OfficialSubmission,
   type OfficialVersion,
   type RollbackRequest
 } from '@/service/cloud-official-agents';
+import {
+  buildOfficialDraftCreatePayload,
+  buildOfficialDraftUpdatePayload,
+  buildOfficialReviewPayload
+} from '@/service/official-agent-forms';
 
 defineOptions({ name: 'OfficialAgentsPanel' });
 
@@ -45,6 +52,7 @@ const canRead = computed(() => can('official-agents:read'));
 const canDraft = computed(() => can('official-agents:draft:write'));
 const canReview = computed(() => can('official-agents:review:write'));
 const canRelease = computed(() => can('official-agents:release:write'));
+const canRollback = computed(() => can('official-agents:rollback:write'));
 const { onStepUpCancelled, onStepUpVerified, runProtected, showStepUp } = useStepUp();
 
 const loading = ref(false);
@@ -79,15 +87,16 @@ async function load() {
   loading.value = true;
   if (state.value !== 'ready') state.value = 'loading';
   try {
-    const [definitionPage, draftPage, submissionPage, versionPage, releasePage, auditPage, rollbackList] = await Promise.all([
-      listOfficialDefinitions({ limit: 50 }),
-      listOfficialDrafts({ limit: 50 }),
-      listOfficialSubmissions({ limit: 50 }),
-      listOfficialVersions({ limit: 50 }),
-      listOfficialReleases({ limit: 50 }),
-      listOfficialAgentAuditEvents({ limit: 50 }),
-      listRollbackRequests().catch(() => [] as RollbackRequest[])
-    ]);
+    const [definitionPage, draftPage, submissionPage, versionPage, releasePage, auditPage, rollbackList] =
+      await Promise.all([
+        listOfficialDefinitions({ limit: 50 }),
+        listOfficialDrafts({ limit: 50 }),
+        listOfficialSubmissions({ limit: 50 }),
+        listOfficialVersions({ limit: 50 }),
+        listOfficialReleases({ limit: 50 }),
+        listOfficialAgentAuditEvents({ limit: 50 }),
+        listRollbackRequests().catch(() => [] as RollbackRequest[])
+      ]);
     definitions.value = definitionPage.items;
     drafts.value = draftPage.items;
     submissions.value = submissionPage.items;
@@ -133,15 +142,16 @@ const actionTarget = ref<{
 const reasonForm = reactive({ note: '', reason_code: '', ticket_reference: '' });
 const definitionForm = reactive({ display_name: '' });
 const draftForm = reactive({
+  baseVersionId: '',
   bundleJSON: '{}',
   definition_id: '',
   display_name: '',
-  kind: 'new_agent',
+  kind: 'initial' as OfficialDraft['kind'],
   manifestJSON: '{}'
 });
 const reviewForm = reactive({
-  decision: 'approved' as 'approved' | 'rejected',
-  initial_channels: ['stable'] as string[],
+  decision: 'approve' as OfficialReviewDecision,
+  initial_channels: ['stable'] as OfficialReleaseChannel[],
   review_reason_code: '',
   safe_note: ''
 });
@@ -164,16 +174,25 @@ function openAction(kind: ActionKind, title: string, target: typeof actionTarget
   actionTarget.value = target;
   resetReason();
   if (kind === 'update-draft' && target.draft) {
+    draftForm.baseVersionId = target.draft.base_version_id || '';
     draftForm.manifestJSON = JSON.stringify(target.draft.manifest, null, 2);
     draftForm.bundleJSON = JSON.stringify(target.draft.bundle, null, 2);
     draftForm.display_name = target.draft.display_name;
+    draftForm.kind = target.draft.kind;
   }
   if (kind === 'create-draft') {
+    draftForm.baseVersionId = '';
     draftForm.definition_id = definitions.value[0]?.definition_id || '';
     draftForm.display_name = '';
-    draftForm.kind = 'new_agent';
+    draftForm.kind = 'initial';
     draftForm.manifestJSON = '{}';
     draftForm.bundleJSON = '{}';
+  }
+  if (kind === 'review-submission') {
+    reviewForm.decision = 'approve';
+    reviewForm.initial_channels = ['stable'];
+    reviewForm.review_reason_code = '';
+    reviewForm.safe_note = '';
   }
   if (kind === 'activate-release' && target.release) {
     releaseForm.version_id = target.release.agent_version_id;
@@ -189,17 +208,6 @@ function openAction(kind: ActionKind, title: string, target: typeof actionTarget
     rollbackForm.target_release_revision_id = '';
   }
   showAction.value = true;
-}
-
-function parseJSONField(text: string, label: string): Record<string, unknown> | undefined {
-  try {
-    const value = JSON.parse(text);
-    if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  } catch {
-    // fallthrough
-  }
-  window.$message?.warning(`${label} 必须是合法的 JSON 对象`);
-  return undefined;
 }
 
 function reasonInput<TPayload extends Record<string, unknown>>(revision: number, payload: TPayload) {
@@ -230,58 +238,64 @@ async function performAction() {
         break;
       }
       case 'create-draft': {
-        const manifest = parseJSONField(draftForm.manifestJSON, 'Manifest');
-        const bundle = parseJSONField(draftForm.bundleJSON, 'Bundle');
-        if (!manifest || !bundle || !draftForm.definition_id || !draftForm.display_name.trim()) {
-          if (manifest && bundle) window.$message?.warning('请填写定义与名称');
+        const result = buildOfficialDraftCreatePayload({
+          baseVersionId: draftForm.baseVersionId,
+          bundleJSON: draftForm.bundleJSON,
+          definitionId: draftForm.definition_id,
+          displayName: draftForm.display_name,
+          kind: draftForm.kind,
+          manifestJSON: draftForm.manifestJSON
+        });
+        if (!result.ok) {
+          window.$message?.warning(result.error);
           return;
         }
-        await createOfficialDraft(
-          reasonInput(1, {
-            bundle,
-            definition_id: draftForm.definition_id,
-            display_name: draftForm.display_name.trim(),
-            kind: draftForm.kind,
-            manifest
-          })
-        );
+        await createOfficialDraft(reasonInput(1, result.payload));
         break;
       }
       case 'update-draft': {
         const draft = actionTarget.value.draft;
-        const manifest = parseJSONField(draftForm.manifestJSON, 'Manifest');
-        const bundle = parseJSONField(draftForm.bundleJSON, 'Bundle');
-        if (!draft || !manifest || !bundle) return;
-        await updateOfficialDraft(
-          draft.draft_id,
-          reasonInput(draft.revision, {
-            bundle,
-            display_name: draftForm.display_name.trim() || draft.display_name,
-            manifest
-          })
-        );
+        if (!draft) return;
+        const result = buildOfficialDraftUpdatePayload({
+          baseVersionId: draftForm.baseVersionId,
+          bundleJSON: draftForm.bundleJSON,
+          displayName: draftForm.display_name,
+          kind: draftForm.kind,
+          manifestJSON: draftForm.manifestJSON
+        });
+        if (!result.ok) {
+          window.$message?.warning(result.error);
+          return;
+        }
+        await updateOfficialDraft(draft.draft_id, reasonInput(draft.revision, result.payload));
         break;
       }
       case 'submit-draft': {
         const draft = actionTarget.value.draft;
         if (!draft) return;
-        await submitOfficialDraft(draft.draft_id, reasonInput(draft.revision, {}) as never);
+        await submitOfficialDraft(draft.draft_id, reasonInput(draft.revision, {}));
         break;
       }
       case 'withdraw-submission': {
         const submission = actionTarget.value.submission;
         if (!submission) return;
-        await withdrawOfficialSubmission(submission.submission_id, reasonInput(submission.revision, {}) as never);
+        await withdrawOfficialSubmission(submission.submission_id, reasonInput(submission.revision, {}));
         break;
       }
       case 'review-submission': {
         const submission = actionTarget.value.submission;
         if (!submission) return;
-        const payload: Record<string, unknown> = { decision: reviewForm.decision };
-        if (reviewForm.review_reason_code.trim()) payload.review_reason_code = reviewForm.review_reason_code.trim();
-        if (reviewForm.safe_note.trim()) payload.safe_note = reviewForm.safe_note.trim();
-        if (reviewForm.decision === 'approved') payload.initial_channels = reviewForm.initial_channels;
-        await reviewOfficialSubmission(submission.submission_id, reasonInput(submission.revision, payload) as never);
+        const result = buildOfficialReviewPayload({
+          decision: reviewForm.decision,
+          initialChannels: reviewForm.initial_channels,
+          reviewReasonCode: reviewForm.review_reason_code,
+          safeNote: reviewForm.safe_note
+        });
+        if (!result.ok) {
+          window.$message?.warning(result.error);
+          return;
+        }
+        await reviewOfficialSubmission(submission.submission_id, reasonInput(submission.revision, result.payload));
         break;
       }
       case 'activate-release': {
@@ -296,7 +310,7 @@ async function performAction() {
             minimum_desktop_version: releaseForm.minimum_desktop_version,
             rollout_basis_points: releaseForm.rollout_basis_points,
             version_id: releaseForm.version_id
-          }) as never
+          })
         );
         break;
       }
@@ -308,7 +322,7 @@ async function performAction() {
           reasonInput(release.head_revision, {
             minimum_desktop_version: releaseForm.minimum_desktop_version,
             rollout_basis_points: releaseForm.rollout_basis_points
-          }) as never
+          })
         );
         break;
       }
@@ -316,7 +330,7 @@ async function performAction() {
         const release = actionTarget.value.release;
         const releaseAction = actionTarget.value.releaseAction;
         if (!release || !releaseAction) return;
-        const input = reasonInput(release.head_revision, {}) as never;
+        const input = reasonInput(release.head_revision, {});
         if (releaseAction === 'pause') await pauseOfficialRelease(release.release_id, input);
         else await resumeOfficialRelease(release.release_id, input);
         break;
@@ -459,7 +473,7 @@ const submissionColumns: DataTableColumns<OfficialSubmission> = [
     width: 190,
     render: row => {
       const buttons: VNodeChild[] = [];
-      if (canReview.value && row.status === 'pending_review') {
+      if (canReview.value && row.status === 'pending') {
         buttons.push(
           h(
             NButton,
@@ -472,7 +486,7 @@ const submissionColumns: DataTableColumns<OfficialSubmission> = [
           )
         );
       }
-      if (canDraft.value && row.status === 'pending_review') {
+      if (canDraft.value && row.status === 'pending') {
         buttons.push(
           h(
             NButton,
@@ -518,48 +532,67 @@ const releaseColumns: DataTableColumns<OfficialRelease> = [
     key: 'actions',
     width: 320,
     render: row =>
-      canRelease.value
+      canRelease.value || canRollback.value
         ? h(NSpace, { size: 8 }, () => [
-            h(
-              NButton,
-              { text: true, type: 'success', onClick: () => openAction('activate-release', '激活发布', { release: row }) },
-              () => '激活'
-            ),
-            h(
-              NButton,
-              { text: true, onClick: () => openAction('rollout-release', '调整灰度', { release: row }) },
-              () => '灰度'
-            ),
-            row.state === 'paused'
+            canRelease.value
               ? h(
                   NButton,
                   {
                     text: true,
-                    type: 'info',
-                    onClick: () => openAction('simple-release', '恢复发布', { release: row, releaseAction: 'resume' })
+                    type: 'success',
+                    onClick: () => openAction('activate-release', '激活发布', { release: row })
                   },
-                  () => '恢复'
+                  () => '激活'
                 )
-              : h(
+              : null,
+            canRelease.value
+              ? h(
+                  NButton,
+                  { text: true, onClick: () => openAction('rollout-release', '调整灰度', { release: row }) },
+                  () => '灰度'
+                )
+              : null,
+            canRelease.value
+              ? row.state === 'paused'
+                ? h(
+                    NButton,
+                    {
+                      text: true,
+                      type: 'info',
+                      onClick: () => openAction('simple-release', '恢复发布', { release: row, releaseAction: 'resume' })
+                    },
+                    () => '恢复'
+                  )
+                : h(
+                    NButton,
+                    {
+                      text: true,
+                      type: 'warning',
+                      onClick: () => openAction('simple-release', '暂停发布', { release: row, releaseAction: 'pause' })
+                    },
+                    () => '暂停'
+                  )
+              : null,
+            canRollback.value
+              ? h(
                   NButton,
                   {
                     text: true,
-                    type: 'warning',
-                    onClick: () => openAction('simple-release', '暂停发布', { release: row, releaseAction: 'pause' })
+                    type: 'error',
+                    onClick: () => openAction('create-rollback', '发起回滚审批', { release: row })
                   },
-                  () => '暂停'
-                ),
-            h(
-              NButton,
-              { text: true, type: 'error', onClick: () => openAction('create-rollback', '发起回滚审批', { release: row }) },
-              () => '发起回滚'
-            )
+                  () => '发起回滚'
+                )
+              : null
           ])
         : '只读'
   }
 ];
 
-const rollbackStatusMeta: Record<RollbackRequest['status'], { label: string; type: 'default' | 'error' | 'info' | 'success' | 'warning' }> = {
+const rollbackStatusMeta: Record<
+  RollbackRequest['status'],
+  { label: string; type: 'default' | 'error' | 'info' | 'success' | 'warning' }
+> = {
   approved: { label: '已批准', type: 'info' },
   cancelled: { label: '已取消', type: 'default' },
   executed: { label: '已执行', type: 'success' },
@@ -587,7 +620,7 @@ const rollbackColumns: DataTableColumns<RollbackRequest> = [
     key: 'actions',
     width: 240,
     render: row => {
-      if (!canRelease.value) return '只读';
+      if (!canRollback.value) return '只读';
       const buttons: VNodeChild[] = [];
       if (row.status === 'requested') {
         buttons.push(
@@ -596,9 +629,7 @@ const rollbackColumns: DataTableColumns<RollbackRequest> = [
         );
       }
       if (row.status === 'approved') {
-        buttons.push(
-          h(NButton, { text: true, type: 'error', onClick: () => executeRollback(row) }, () => '执行回滚')
-        );
+        buttons.push(h(NButton, { text: true, type: 'error', onClick: () => executeRollback(row) }, () => '执行回滚'));
       }
       if (row.status === 'requested' || row.status === 'approved') {
         buttons.push(h(NButton, { text: true, onClick: () => cancelRollback(row) }, () => '取消'));
@@ -610,17 +641,14 @@ const rollbackColumns: DataTableColumns<RollbackRequest> = [
 
 const auditColumns: DataTableColumns<OfficialAgentAuditEvent> = [
   { title: '时间', key: 'created_at', width: 170, render: row => date(row.created_at) },
-  { title: '动作', key: 'action', minWidth: 160, ellipsis: { tooltip: true } },
+  { title: '事件', key: 'event_type', minWidth: 160, ellipsis: { tooltip: true } },
   { title: '管理员', key: 'actor_admin_id', width: 150, render: row => row.actor_admin_id || '—' },
   { title: '角色', key: 'actor_admin_role', width: 120, render: row => row.actor_admin_role || '—' },
-  {
-    title: '资源',
-    key: 'resource',
-    minWidth: 180,
-    render: row => row.definition_id || row.draft_id || row.submission_id || row.release_id || row.resource_id || '—'
-  },
+  { title: '对象类型', key: 'object_type', width: 120 },
+  { title: '对象 ID', key: 'object_id', minWidth: 180, ellipsis: { tooltip: true } },
+  { title: '结果', key: 'outcome', width: 90 },
   { title: '原因码', key: 'reason_code', width: 140, render: row => row.reason_code || '—' },
-  { title: '操作 ID', key: 'operation_id', width: 120, render: row => short(row.operation_id) }
+  { title: '请求 ID', key: 'request_id', minWidth: 160, ellipsis: { tooltip: true } }
 ];
 
 onMounted(() => {
@@ -702,7 +730,7 @@ onMounted(() => {
             :columns="auditColumns"
             :data="auditEvents"
             :loading="loading"
-            :row-key="row => row.audit_event_id || row.operation_id || `${row.action}-${row.created_at}`"
+            :row-key="row => row.event_id"
             size="small"
             :scroll-x="1080"
           />
@@ -710,12 +738,7 @@ onMounted(() => {
       </NTabs>
     </ResourceState>
 
-    <NModal
-      v-model:show="showAction"
-      preset="card"
-      :title="actionTitle"
-      class="w-720px max-w-[calc(100vw-32px)]"
-    >
+    <NModal v-model:show="showAction" preset="card" :title="actionTitle" class="w-720px max-w-[calc(100vw-32px)]">
       <NForm label-placement="top">
         <template v-if="actionKind === 'create-definition'">
           <NFormItem label="Agent 名称" required>
@@ -730,14 +753,17 @@ onMounted(() => {
               :options="definitions.map(item => ({ label: item.display_name, value: item.definition_id }))"
             />
           </NFormItem>
-          <NFormItem v-if="actionKind === 'create-draft'" label="草稿类型" required>
+          <NFormItem label="草稿类型" required>
             <NSelect
               v-model:value="draftForm.kind"
               :options="[
-                { label: '全新 Agent', value: 'new_agent' },
-                { label: '版本更新', value: 'update' }
+                { label: '全新 Agent', value: 'initial' },
+                { label: '版本更新', value: 'next' }
               ]"
             />
+          </NFormItem>
+          <NFormItem v-if="draftForm.kind === 'next'" label="基础版本 ID" required>
+            <NInput v-model:value="draftForm.baseVersionId" placeholder="当前线上 Agent 版本 UUID" />
           </NFormItem>
           <NFormItem label="显示名称" :required="actionKind === 'create-draft'">
             <NInput v-model:value="draftForm.display_name" />
@@ -755,25 +781,25 @@ onMounted(() => {
             <NSelect
               v-model:value="reviewForm.decision"
               :options="[
-                { label: '通过', value: 'approved' },
-                { label: '驳回', value: 'rejected' }
+                { label: '通过', value: 'approve' },
+                { label: '驳回', value: 'reject' }
               ]"
             />
           </NFormItem>
-          <NFormItem v-if="reviewForm.decision === 'approved'" label="首发渠道">
+          <NFormItem v-if="reviewForm.decision === 'approve'" label="首发渠道" required>
             <NSelect
               v-model:value="reviewForm.initial_channels"
               multiple
               :options="[
                 { label: 'stable', value: 'stable' },
-                { label: 'beta', value: 'beta' }
+                { label: 'internal', value: 'internal' }
               ]"
             />
           </NFormItem>
-          <NFormItem label="审核原因码（可选）">
+          <NFormItem v-if="reviewForm.decision === 'reject'" label="审核原因码" required>
             <NInput v-model:value="reviewForm.review_reason_code" />
           </NFormItem>
-          <NFormItem label="审核说明（可选）">
+          <NFormItem v-if="reviewForm.decision === 'reject'" label="审核说明（可选）">
             <NInput v-model:value="reviewForm.safe_note" type="textarea" :rows="2" />
           </NFormItem>
         </template>
@@ -782,7 +808,12 @@ onMounted(() => {
           <NFormItem v-if="actionKind === 'activate-release'" label="版本" required>
             <NSelect
               v-model:value="releaseForm.version_id"
-              :options="versions.map(item => ({ label: `v${item.version_number}（${short(item.version_id)}）`, value: item.version_id }))"
+              :options="
+                versions.map(item => ({
+                  label: `v${item.version_number}（${short(item.version_id)}）`,
+                  value: item.version_id
+                }))
+              "
             />
           </NFormItem>
           <NFormItem label="灰度比例（基点，10000 = 100%）" required>

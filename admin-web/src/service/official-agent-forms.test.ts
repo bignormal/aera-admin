@@ -1,0 +1,179 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildOfficialDraftCreatePayload,
+  buildOfficialDraftUpdatePayload,
+  buildOfficialReviewPayload
+} from './official-agent-forms';
+
+const manifest = {
+  assets: [],
+  dependencies: [],
+  identity: { system_prompt: 'You are helpful.' },
+  model_constraints: { allowed_models: ['gpt-5'], allowed_providers: ['openai'] },
+  runtime_compatibility: { minimum_version: '0.7.4' },
+  schema_version: 1,
+  tools: { allowed: ['read'], denied: ['shell'] }
+};
+
+const bundle = {
+  assets: [{ content: '# Skill', path: 'skills/example.md' }]
+};
+
+describe('official Agent draft forms', () => {
+  it('builds a canonical initial draft and omits base_version_id', () => {
+    expect(
+      buildOfficialDraftCreatePayload({
+        baseVersionId: '',
+        bundleJSON: JSON.stringify(bundle),
+        definitionId: 'definition-1',
+        displayName: ' Example Agent ',
+        kind: 'initial',
+        manifestJSON: JSON.stringify(manifest)
+      })
+    ).toEqual({
+      ok: true,
+      payload: {
+        bundle,
+        definition_id: 'definition-1',
+        display_name: 'Example Agent',
+        kind: 'initial',
+        manifest
+      }
+    });
+  });
+
+  it('requires a base version for a next draft', () => {
+    expect(
+      buildOfficialDraftCreatePayload({
+        baseVersionId: '  ',
+        bundleJSON: JSON.stringify(bundle),
+        definitionId: 'definition-1',
+        displayName: 'Example Agent',
+        kind: 'next',
+        manifestJSON: JSON.stringify(manifest)
+      })
+    ).toEqual({ ok: false, error: '版本更新草稿必须填写基础版本 ID' });
+  });
+
+  it('requires the base version to be a UUID', () => {
+    expect(
+      buildOfficialDraftCreatePayload({
+        baseVersionId: 'version-1',
+        bundleJSON: JSON.stringify(bundle),
+        definitionId: 'definition-1',
+        displayName: 'Example Agent',
+        kind: 'next',
+        manifestJSON: JSON.stringify(manifest)
+      })
+    ).toEqual({ ok: false, error: '基础版本 ID 必须是 UUID' });
+  });
+
+  it('rejects a base version on an initial draft', () => {
+    expect(
+      buildOfficialDraftUpdatePayload({
+        baseVersionId: 'version-1',
+        bundleJSON: JSON.stringify(bundle),
+        displayName: 'Example Agent',
+        kind: 'initial',
+        manifestJSON: JSON.stringify(manifest)
+      })
+    ).toEqual({ ok: false, error: '全新 Agent 草稿不能设置基础版本 ID' });
+  });
+
+  it('rejects JSON objects that do not match the canonical manifest and bundle schemas', () => {
+    expect(
+      buildOfficialDraftUpdatePayload({
+        baseVersionId: '',
+        bundleJSON: '{}',
+        displayName: 'Example Agent',
+        kind: 'initial',
+        manifestJSON: '{}'
+      })
+    ).toEqual({ ok: false, error: 'Manifest 不符合 AgentManifestV1 结构' });
+  });
+});
+
+describe('official Agent review forms', () => {
+  it('builds an approval with canonical nonempty channels', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'approve',
+        initialChannels: ['internal', 'stable'],
+        reviewReasonCode: '',
+        safeNote: ''
+      })
+    ).toEqual({
+      ok: true,
+      payload: { decision: 'approve', initial_channels: ['internal', 'stable'] }
+    });
+  });
+
+  it('rejects notes that the canonical approval schema prohibits', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'approve',
+        initialChannels: ['stable'],
+        reviewReasonCode: '',
+        safeNote: 'not allowed on approval'
+      })
+    ).toEqual({ ok: false, error: '批准提交不能填写审核原因码或审核说明' });
+  });
+
+  it('rejects an approval without an initial channel', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'approve',
+        initialChannels: [],
+        reviewReasonCode: '',
+        safeNote: ''
+      })
+    ).toEqual({ ok: false, error: '批准提交时至少选择一个首发渠道' });
+  });
+
+  it('requires a review reason code for rejection', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'reject',
+        initialChannels: ['stable'],
+        reviewReasonCode: '  ',
+        safeNote: ''
+      })
+    ).toEqual({ ok: false, error: '驳回提交时必须填写审核原因码' });
+  });
+
+  it('validates the canonical review reason code format', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'reject',
+        initialChannels: [],
+        reviewReasonCode: 'Policy Violation',
+        safeNote: ''
+      })
+    ).toEqual({ ok: false, error: '审核原因码格式不符合 Cloud 契约' });
+  });
+
+  it('enforces the canonical safe note length', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'reject',
+        initialChannels: [],
+        reviewReasonCode: 'policy_violation',
+        safeNote: 'x'.repeat(501)
+      })
+    ).toEqual({ ok: false, error: '审核说明不能超过 500 个字符' });
+  });
+
+  it('omits approval channels from a rejection', () => {
+    expect(
+      buildOfficialReviewPayload({
+        decision: 'reject',
+        initialChannels: ['internal'],
+        reviewReasonCode: 'policy_violation',
+        safeNote: ''
+      })
+    ).toEqual({
+      ok: true,
+      payload: { decision: 'reject', review_reason_code: 'policy_violation' }
+    });
+  });
+});

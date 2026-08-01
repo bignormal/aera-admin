@@ -93,6 +93,7 @@ jobs:
         run: |
           bash scripts/tests/candidate-contract.test.sh
           bash scripts/tests/internal-beta-delivery.test.sh
+          pnpm run check:cloud-admin-contract
           pnpm lint
           pnpm test:int
           pnpm --dir admin-web typecheck
