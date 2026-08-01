@@ -65,9 +65,14 @@ describe('official Agent draft forms', () => {
     ).toEqual({ ok: false, error: '版本更新草稿必须填写基础版本 ID' });
   });
 
-  it('accepts V2 user-select and multi-route allowlist policies', () => {
+  it('accepts every canonical V2 model policy mode', () => {
     for (const modelPolicy of [
       { allowed_models: [], allowed_providers: [], mode: 'user_select' },
+      {
+        allowed_models: ['gpt-5.6-sol'],
+        allowed_providers: ['petoi'],
+        mode: 'fixed'
+      },
       {
         allowed_models: ['claude-opus-4-6', 'gpt-5.6-sol'],
         allowed_providers: ['petoi', 'yundu.lat'],
@@ -85,6 +90,25 @@ describe('official Agent draft forms', () => {
         })
       ).toMatchObject({ ok: true, payload: { manifest: candidate } });
     }
+  });
+
+  it('does not apply the V2 route-count limit to a V1 manifest', () => {
+    const candidate = {
+      ...manifest,
+      model_constraints: {
+        allowed_models: Array.from({ length: 129 }, (_, index) => `model-${index}`),
+        allowed_providers: Array.from({ length: 129 }, (_, index) => `provider-${index}`)
+      }
+    };
+    expect(
+      buildOfficialDraftUpdatePayload({
+        baseVersionId: '',
+        bundleJSON: JSON.stringify(bundle),
+        displayName: 'Example Agent',
+        kind: 'initial',
+        manifestJSON: JSON.stringify(candidate)
+      })
+    ).toMatchObject({ ok: true, payload: { manifest: candidate } });
   });
 
   it('rejects noncanonical V2 model policy modes before Cloud submission', () => {

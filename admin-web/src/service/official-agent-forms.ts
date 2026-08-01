@@ -102,11 +102,13 @@ function isAgentManifest(value: unknown): value is AgentManifest {
     value.schema_version === 1
       ? ['allowed_providers', 'allowed_models']
       : ['mode', 'allowed_providers', 'allowed_models'];
+  const maximumModelEntries =
+    value.schema_version === 2 ? 128 : Number.POSITIVE_INFINITY;
   if (
     !hasOnlyKeys(models, modelKeys) ||
-    !isUniqueStringArray(models.allowed_providers, 0, 128) ||
+    !isUniqueStringArray(models.allowed_providers, 0, maximumModelEntries) ||
     models.allowed_providers.some(item => item.length > 128) ||
-    !isUniqueStringArray(models.allowed_models, 0, 128) ||
+    !isUniqueStringArray(models.allowed_models, 0, maximumModelEntries) ||
     models.allowed_models.some(item => item.length > 256)
   ) {
     return false;
