@@ -1,5 +1,5 @@
 import type {
-  AgentManifestV1,
+  AgentManifest,
   AgentVersionBundleV1,
   OfficialDraftCreatePayload,
   OfficialDraftUpdatePayload,
@@ -55,24 +55,24 @@ function isUniqueStringArray(value: unknown, minimum = 0, maximum = Number.POSIT
   );
 }
 
-function isAgentManifest(value: unknown): value is AgentManifestV1 {
+function isAgentManifest(value: unknown): value is AgentManifest {
   if (
     !isRecord(value) ||
+    (value.schema_version !== 1 && value.schema_version !== 2) ||
     !hasOnlyKeys(value, [
       'schema_version',
       'identity',
       'assets',
-      'model_constraints',
+      value.schema_version === 1 ? 'model_constraints' : 'model_policy',
       'tools',
       'dependencies',
       'runtime_compatibility'
-    ]) ||
-    value.schema_version !== 1
+    ])
   ) {
     return false;
   }
 
-  const { identity, assets, model_constraints: models, tools, dependencies, runtime_compatibility: runtime } = value;
+  const { identity, assets, tools, dependencies, runtime_compatibility: runtime } = value;
   if (
     !isRecord(identity) ||
     !hasOnlyKeys(identity, ['system_prompt']) ||
@@ -96,15 +96,35 @@ function isAgentManifest(value: unknown): value is AgentManifestV1 {
   ) {
     return false;
   }
+  const models = value.schema_version === 1 ? value.model_constraints : value.model_policy;
+  if (!isRecord(models)) return false;
+  const modelKeys =
+    value.schema_version === 1
+      ? ['allowed_providers', 'allowed_models']
+      : ['mode', 'allowed_providers', 'allowed_models'];
   if (
-    !isRecord(models) ||
-    !hasOnlyKeys(models, ['allowed_providers', 'allowed_models']) ||
-    !isUniqueStringArray(models.allowed_providers, 1) ||
+    !hasOnlyKeys(models, modelKeys) ||
+    !isUniqueStringArray(models.allowed_providers, 0, 128) ||
     models.allowed_providers.some(item => item.length > 128) ||
-    !isUniqueStringArray(models.allowed_models, 1) ||
+    !isUniqueStringArray(models.allowed_models, 0, 128) ||
     models.allowed_models.some(item => item.length > 256)
   ) {
     return false;
+  }
+  if (value.schema_version === 1) {
+    if (models.allowed_providers.length === 0 || models.allowed_models.length === 0) return false;
+  } else {
+    const providerCount = models.allowed_providers.length;
+    const modelCount = models.allowed_models.length;
+    if (
+      !(
+        (models.mode === 'user_select' && providerCount === 0 && modelCount === 0) ||
+        (models.mode === 'allowlist' && providerCount > 0 && modelCount > 0) ||
+        (models.mode === 'fixed' && providerCount === 1 && modelCount === 1)
+      )
+    ) {
+      return false;
+    }
   }
   if (
     !isRecord(tools) ||
@@ -135,7 +155,9 @@ function isAgentManifest(value: unknown): value is AgentManifestV1 {
     isRecord(runtime) &&
     hasOnlyKeys(runtime, ['minimum_version'], ['maximum_version_exclusive']) &&
     isString(runtime.minimum_version, 1, 64) &&
-    (runtime.maximum_version_exclusive === undefined || isString(runtime.maximum_version_exclusive, 1, 64))
+    (runtime.maximum_version_exclusive === undefined ||
+      runtime.maximum_version_exclusive === null ||
+      isString(runtime.maximum_version_exclusive, 1, 64))
   );
 }
 
@@ -169,13 +191,13 @@ function parseDraftContent(input: DraftFormInput): FormResult<{
   bundle: AgentVersionBundleV1;
   display_name: string;
   kind: DraftKind;
-  manifest: AgentManifestV1;
+  manifest: AgentManifest;
 }> {
   const displayName = input.displayName.trim();
   if (!displayName) return { ok: false, error: '请填写显示名称' };
 
   const manifest = parseJSON(input.manifestJSON);
-  if (!isAgentManifest(manifest)) return { ok: false, error: 'Manifest 不符合 AgentManifestV1 结构' };
+  if (!isAgentManifest(manifest)) return { ok: false, error: 'Manifest 不符合 AgentManifest V1/V2 结构' };
   const bundle = parseJSON(input.bundleJSON);
   if (!isAgentVersionBundle(bundle)) return { ok: false, error: 'Bundle 不符合 AgentVersionBundleV1 结构' };
 

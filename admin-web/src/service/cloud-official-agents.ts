@@ -12,7 +12,9 @@ export type OfficialVersion = CloudSchemas['OfficialVersion'];
 export type OfficialRelease = CloudSchemas['OfficialRelease'];
 export type OfficialAgentAuditEvent = CloudSchemas['OfficialAuditEvent'];
 export type OfficialReviewDecision = CloudSchemas['OfficialReview']['decision'];
+export type AgentManifest = CloudSchemas['AgentManifest'];
 export type AgentManifestV1 = CloudSchemas['AgentManifestV1'];
+export type AgentManifestV2 = CloudSchemas['AgentManifestV2'];
 export type AgentVersionBundleV1 = CloudSchemas['AgentVersionBundleV1'];
 export type OfficialReleaseChannel = NonNullable<
   CloudSchemas['OfficialReviewMutation']['payload']['initial_channels']
