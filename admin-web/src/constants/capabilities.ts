@@ -143,3 +143,67 @@ export function isAdminRole(value: unknown): value is AdminRole {
 export function hasCapability(role: AdminRole | '' | undefined, capability: Capability): boolean {
   return isAdminRole(role) && roleCapabilities[role].includes(capability);
 }
+
+export type PublishingSurfaceAccess = {
+  readonly catalog: boolean;
+  readonly official: boolean;
+  readonly officialApproved: boolean;
+  readonly officialAudit: boolean;
+  readonly officialRollback: boolean;
+  readonly officialWorkflow: boolean;
+};
+
+const officialPublishingSurfaces: Record<
+  AdminRole,
+  Pick<PublishingSurfaceAccess, 'officialApproved' | 'officialAudit' | 'officialRollback' | 'officialWorkflow'>
+> = {
+  auditor: {
+    officialApproved: true,
+    officialAudit: true,
+    officialRollback: false,
+    officialWorkflow: true
+  },
+  finance_admin: {
+    officialApproved: false,
+    officialAudit: false,
+    officialRollback: false,
+    officialWorkflow: false
+  },
+  operations_admin: {
+    officialApproved: true,
+    officialAudit: false,
+    officialRollback: false,
+    officialWorkflow: false
+  },
+  publisher: {
+    officialApproved: true,
+    officialAudit: false,
+    officialRollback: false,
+    officialWorkflow: true
+  },
+  super_admin: {
+    officialApproved: true,
+    officialAudit: true,
+    officialRollback: true,
+    officialWorkflow: true
+  }
+};
+
+export function getPublishingSurfaceAccess(role: AdminRole | '' | undefined): PublishingSurfaceAccess {
+  if (!isAdminRole(role)) {
+    return {
+      catalog: false,
+      official: false,
+      officialApproved: false,
+      officialAudit: false,
+      officialRollback: false,
+      officialWorkflow: false
+    };
+  }
+
+  return {
+    catalog: hasCapability(role, 'content:publish:read'),
+    official: hasCapability(role, 'official-agents:read'),
+    ...officialPublishingSurfaces[role]
+  };
+}

@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import hljs from 'highlight.js/lib/core';
+import json from 'highlight.js/lib/languages/json';
 import { NConfigProvider, darkTheme } from 'naive-ui';
 import type { WatermarkProps } from 'naive-ui';
 import { useAppStore } from './store/modules/app';
 import { useThemeStore } from './store/modules/theme';
 import { naiveDateLocales, naiveLocales } from './locales/naive';
+
+hljs.registerLanguage('json', json);
 
 defineOptions({
   name: 'App'
@@ -46,6 +50,7 @@ const watermarkProps = computed<WatermarkProps>(() => {
     :theme-overrides="themeStore.naiveTheme"
     :locale="naiveLocale"
     :date-locale="naiveDateLocale"
+    :hljs="hljs"
     class="h-full"
   >
     <AppProvider>

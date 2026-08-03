@@ -1,6 +1,6 @@
 import type { CollectionConfig } from 'payload'
 
-import { canManageCatalog, isAuthenticated } from '../access/adminAccess'
+import { canManageCatalog, capabilityAccess } from '../access/adminAccess'
 import { createAuditHooks } from '../domain/audit'
 
 const categoryAuditHooks = createAuditHooks({
@@ -15,7 +15,7 @@ export const ExpertCategories: CollectionConfig = {
   access: {
     create: canManageCatalog,
     delete: canManageCatalog,
-    read: isAuthenticated,
+    read: capabilityAccess('content:categories:read'),
     update: canManageCatalog,
   },
   hooks: {

@@ -4,6 +4,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { NButton, NSpace, NTag } from 'naive-ui';
 import OfficialAgentsPanel from './modules/official-agents-panel.vue';
 import { useCapability } from '@/composables/use-capability';
+import { getPublishingSurfaceAccess } from '@/constants/capabilities';
 import { listAgents } from '@/service/agents';
 import { ApiError } from '@/service/http';
 import { listPets } from '@/service/pets';
@@ -11,6 +12,7 @@ import { listPlugins } from '@/service/plugins';
 import { publishResource, saveResourceDraft, type PublishingCollection } from '@/service/publishing';
 import type { ResourceID } from '@/service/resources';
 import { listSkills } from '@/service/skills';
+import { useAuthStore } from '@/store/modules/auth';
 
 defineOptions({ name: 'PublishingPage' });
 
@@ -25,7 +27,9 @@ type PublishingRow = {
 };
 
 const { can } = useCapability();
-const canOfficialRead = computed(() => can('official-agents:read'));
+const authStore = useAuthStore();
+const surfaceAccess = computed(() => getPublishingSurfaceAccess(authStore.userInfo.role));
+const activeTab = ref<'catalog' | 'official'>(surfaceAccess.value.catalog ? 'catalog' : 'official');
 const loading = ref(false);
 const state = ref<'empty' | 'error' | 'loading' | 'ready' | 'unavailable'>('loading');
 const rows = ref<PublishingRow[]>([]);
@@ -129,14 +133,18 @@ async function changeStatus(row: PublishingRow, published: boolean) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  if (surfaceAccess.value.catalog) void load();
+});
 </script>
 
 <template>
   <ResourcePageShell title="发布中心" description="本地目录发布与 aera-cloud 官方 Agent 审核发布统一入口">
-    <template #actions><NButton :loading="loading" @click="load">刷新</NButton></template>
-    <NTabs type="line" animated>
-      <NTabPane name="catalog" tab="目录发布">
+    <template #actions>
+      <NButton v-if="surfaceAccess.catalog && activeTab === 'catalog'" :loading="loading" @click="load">刷新</NButton>
+    </template>
+    <NTabs v-model:value="activeTab" type="line" animated>
+      <NTabPane v-if="surfaceAccess.catalog" name="catalog" tab="目录发布">
         <NCard :bordered="false" class="card-wrapper">
           <ResourceState :state="state">
             <template #actions><NButton @click="load">重试</NButton></template>
@@ -152,7 +160,7 @@ onMounted(load);
           </ResourceState>
         </NCard>
       </NTabPane>
-      <NTabPane v-if="canOfficialRead" name="official" tab="官方 Agent 工作台">
+      <NTabPane v-if="surfaceAccess.official" name="official" tab="官方 Agent 工作台">
         <NCard :bordered="false" class="card-wrapper">
           <OfficialAgentsPanel />
         </NCard>

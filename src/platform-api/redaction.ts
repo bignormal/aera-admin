@@ -1,5 +1,5 @@
 const sensitiveKey =
-  /(?:password|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key)/i
+  /(?:password|secret|token(?!s(?:$|[_-]))|api[_-]?key|authorization|cookie|credential|private[_-]?key)/i
 const maxDepth = 10
 const maxArrayLength = 1_000
 

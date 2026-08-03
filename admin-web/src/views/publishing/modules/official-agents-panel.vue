@@ -5,6 +5,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { NButton, NSpace, NTag, NText } from 'naive-ui';
 import { useCapability } from '@/composables/use-capability';
 import { useStepUp } from '@/composables/use-step-up';
+import { getPublishingSurfaceAccess } from '@/constants/capabilities';
 import { CloudServiceError } from '@/service/cloud';
 import {
   activateOfficialRelease,
@@ -44,11 +45,14 @@ import {
   buildOfficialDraftUpdatePayload,
   buildOfficialReviewPayload
 } from '@/service/official-agent-forms';
+import { useAuthStore } from '@/store/modules/auth';
 
 defineOptions({ name: 'OfficialAgentsPanel' });
 
 const { can } = useCapability();
-const canRead = computed(() => can('official-agents:read'));
+const authStore = useAuthStore();
+const surfaceAccess = computed(() => getPublishingSurfaceAccess(authStore.userInfo.role));
+const canRead = computed(() => surfaceAccess.value.official);
 const canDraft = computed(() => can('official-agents:draft:write'));
 const canReview = computed(() => can('official-agents:review:write'));
 const canRelease = computed(() => can('official-agents:release:write'));
@@ -87,23 +91,45 @@ async function load() {
   loading.value = true;
   if (state.value !== 'ready') state.value = 'loading';
   try {
-    const [definitionPage, draftPage, submissionPage, versionPage, releasePage, auditPage, rollbackList] =
-      await Promise.all([
-        listOfficialDefinitions({ limit: 50 }),
-        listOfficialDrafts({ limit: 50 }),
-        listOfficialSubmissions({ limit: 50 }),
-        listOfficialVersions({ limit: 50 }),
-        listOfficialReleases({ limit: 50 }),
-        listOfficialAgentAuditEvents({ limit: 50 }),
-        listRollbackRequests().catch(() => [] as RollbackRequest[])
-      ]);
-    definitions.value = definitionPage.items;
-    drafts.value = draftPage.items;
-    submissions.value = submissionPage.items;
-    versions.value = versionPage.items;
-    releases.value = releasePage.items;
-    auditEvents.value = auditPage.items;
-    rollbacks.value = rollbackList;
+    const requests: Promise<void>[] = [];
+    if (surfaceAccess.value.officialWorkflow) {
+      requests.push(
+        Promise.all([
+          listOfficialDefinitions({ limit: 50 }),
+          listOfficialDrafts({ limit: 50 }),
+          listOfficialSubmissions({ limit: 50 })
+        ]).then(([definitionPage, draftPage, submissionPage]) => {
+          definitions.value = definitionPage.items;
+          drafts.value = draftPage.items;
+          submissions.value = submissionPage.items;
+        })
+      );
+    }
+    if (surfaceAccess.value.officialApproved) {
+      requests.push(
+        Promise.all([listOfficialVersions({ limit: 50 }), listOfficialReleases({ limit: 50 })]).then(
+          ([versionPage, releasePage]) => {
+            versions.value = versionPage.items;
+            releases.value = releasePage.items;
+          }
+        )
+      );
+    }
+    if (surfaceAccess.value.officialAudit) {
+      requests.push(
+        listOfficialAgentAuditEvents({ limit: 50 }).then(auditPage => {
+          auditEvents.value = auditPage.items;
+        })
+      );
+    }
+    if (surfaceAccess.value.officialRollback) {
+      requests.push(
+        listRollbackRequests().then(rollbackList => {
+          rollbacks.value = rollbackList;
+        })
+      );
+    }
+    await Promise.all(requests);
     state.value = 'ready';
   } catch (error) {
     if (error instanceof CloudServiceError && error.kind === 'forbidden') state.value = 'forbidden';
@@ -672,7 +698,7 @@ onMounted(() => {
     <ResourceState :state="state === 'ready' ? 'ready' : state">
       <template #actions><NButton @click="load">重试</NButton></template>
       <NTabs type="line" animated>
-        <NTabPane name="definitions" :tab="`定义（${definitions.length}）`">
+        <NTabPane v-if="surfaceAccess.officialWorkflow" name="definitions" :tab="`定义（${definitions.length}）`">
           <NDataTable
             :columns="definitionColumns"
             :data="definitions"
@@ -682,7 +708,7 @@ onMounted(() => {
             :scroll-x="880"
           />
         </NTabPane>
-        <NTabPane name="drafts" :tab="`草稿（${drafts.length}）`">
+        <NTabPane v-if="surfaceAccess.officialWorkflow" name="drafts" :tab="`草稿（${drafts.length}）`">
           <NDataTable
             :columns="draftColumns"
             :data="drafts"
@@ -692,7 +718,7 @@ onMounted(() => {
             :scroll-x="980"
           />
         </NTabPane>
-        <NTabPane name="submissions" :tab="`审核（${submissions.length}）`">
+        <NTabPane v-if="surfaceAccess.officialWorkflow" name="submissions" :tab="`审核（${submissions.length}）`">
           <NDataTable
             :columns="submissionColumns"
             :data="submissions"
@@ -702,7 +728,7 @@ onMounted(() => {
             :scroll-x="980"
           />
         </NTabPane>
-        <NTabPane name="releases" :tab="`发布（${releases.length}）`">
+        <NTabPane v-if="surfaceAccess.officialApproved" name="releases" :tab="`发布（${releases.length}）`">
           <NDataTable
             :columns="releaseColumns"
             :data="releases"
@@ -712,7 +738,7 @@ onMounted(() => {
             :scroll-x="1240"
           />
         </NTabPane>
-        <NTabPane name="rollbacks" :tab="`回滚审批（${rollbacks.length}）`">
+        <NTabPane v-if="surfaceAccess.officialRollback" name="rollbacks" :tab="`回滚审批（${rollbacks.length}）`">
           <NAlert type="info" class="mb-12px" :show-icon="false">
             回滚采用双人复核：发起人创建审批，另一名管理员批准后由批准人执行（执行需 TOTP 二次验证）。
           </NAlert>
@@ -725,7 +751,7 @@ onMounted(() => {
             :scroll-x="1140"
           />
         </NTabPane>
-        <NTabPane name="audit-events" :tab="`审计事件（${auditEvents.length}）`">
+        <NTabPane v-if="surfaceAccess.officialAudit" name="audit-events" :tab="`审计事件（${auditEvents.length}）`">
           <NDataTable
             :columns="auditColumns"
             :data="auditEvents"

@@ -44,6 +44,9 @@ importers:
       echarts:
         specifier: 6.0.0
         version: 6.0.0
+      highlight.js:
+        specifier: 11.11.1
+        version: 11.11.1
       json5:
         specifier: 2.2.3
         version: 2.2.3

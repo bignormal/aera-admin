@@ -219,8 +219,7 @@ const sessionColumns: DataTableColumns<CloudSession> = [
     title: '状态',
     key: 'status',
     width: 100,
-    render: row =>
-      h(NTag, { bordered: false, type: row.status === 'active' ? 'success' : 'default' }, () => row.status)
+    render: row => h(NTag, { bordered: false, type: row.status === 'active' ? 'success' : 'default' }, () => row.status)
   },
   { title: '签发时间', key: 'issued_at', width: 160, render: row => date(row.issued_at) },
   { title: '过期时间', key: 'expires_at', width: 160, render: row => date(row.expires_at) },
@@ -246,7 +245,7 @@ const sessionColumns: DataTableColumns<CloudSession> = [
 
 <template>
   <NDrawer v-model:show="show" :width="860" placement="right">
-    <NDrawerContent :title="`云端用户详情`" closable>
+    <NDrawerContent title="云端用户详情" closable>
       <NSpin :show="loading">
         <template v-if="user">
           <NDescriptions :column="2" label-placement="left" bordered size="small" class="mb-16px">
@@ -298,10 +297,13 @@ const sessionColumns: DataTableColumns<CloudSession> = [
           <NAlert v-if="lastOperation" type="info" class="mb-16px" :show-icon="false">
             <NSpace vertical :size="8">
               <div>
-                最新云命令：<NText code>{{ lastOperation.operation_id }}</NText>
+                最新云命令：
+                <NText code>{{ lastOperation.operation_id }}</NText>
               </div>
               <div>
-                状态：{{ lastOperation.status }}；更新时间：{{ date(lastOperation.updated_at) }}；管理修订：{{ lastOperation.administrative_revision || '—' }}
+                状态：{{ lastOperation.status }}；更新时间：{{ date(lastOperation.updated_at) }}；管理修订：{{
+                  lastOperation.administrative_revision || '—'
+                }}
               </div>
               <NSpace>
                 <NButton size="small" :loading="operationLoading" @click="refreshLastOperation">查询状态</NButton>
@@ -358,12 +360,7 @@ const sessionColumns: DataTableColumns<CloudSession> = [
         :title="pendingCommand ? commandTitles[pendingCommand.kind] : ''"
         class="w-560px max-w-[calc(100vw-32px)]"
       >
-        <NAlert
-          v-if="pendingCommand?.kind === 'reset-password'"
-          type="warning"
-          class="mb-12px"
-          :show-icon="false"
-        >
+        <NAlert v-if="pendingCommand?.kind === 'reset-password'" type="warning" class="mb-12px" :show-icon="false">
           强制重置密码属于高危操作，提交后需要 TOTP 二次验证。
         </NAlert>
         <NForm label-placement="top">

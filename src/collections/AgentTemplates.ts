@@ -1,6 +1,6 @@
 import type { CollectionConfig } from 'payload'
 
-import { canManageCatalog, isAuthenticated } from '../access/adminAccess'
+import { canManageCatalog, capabilityAccess } from '../access/adminAccess'
 import { createAuditHooks } from '../domain/audit'
 import { assignReleaseVersion, validateAgentPublish } from '../domain/publishing'
 
@@ -23,7 +23,7 @@ export const AgentTemplates: CollectionConfig = {
   access: {
     create: canManageCatalog,
     delete: canManageCatalog,
-    read: isAuthenticated,
+    read: capabilityAccess('content:agents:read'),
     update: canManageCatalog,
   },
   hooks: {

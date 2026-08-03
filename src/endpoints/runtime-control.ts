@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Endpoint, PayloadHandler, PayloadRequest } from 'payload'
 
 import { hasCapability } from '../access/capabilities'
+import { appendAuditLog, type AuditEvent } from '../domain/audit'
 import {
   acceptHeartbeat,
   authenticateDevice,
@@ -38,6 +39,14 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+async function auditRuntimeMutation(req: PayloadRequest, event: AuditEvent): Promise<void> {
+  try {
+    await appendAuditLog(req, event)
+  } catch {
+    // The Runtime write has already succeeded; keep its stable result if local audit persistence is unavailable.
+  }
+}
+
 export const createRuntimeEnrollmentHandler: PayloadHandler = async (req) => {
   const id = requestID(req)
   if (!req.user) return failure(id, 401, 'UNAUTHENTICATED', '请先登录管理后台。')
@@ -46,7 +55,24 @@ export const createRuntimeEnrollmentHandler: PayloadHandler = async (req) => {
   }
   const input = parseEnrollmentInput(await json(req))
   if (!input) return failure(id, 400, 'INVALID_BODY', '注册信息不合法。')
-  return success(id, await createEnrollment(req.payload, input))
+  const result = await createEnrollment(req.payload, input)
+  await auditRuntimeMutation(req, {
+    action: 'runtime.enrollment.create',
+    after: {
+      expiresAt: result.expiresAt,
+      instanceId: result.instanceId,
+      instanceType: input.instanceType,
+      name: input.name,
+      tenantId: input.tenantId,
+    },
+    capability: 'runtime:command:create',
+    outcome: 'succeeded',
+    requestId: id,
+    resourceId: result.instanceId,
+    resourceName: input.name,
+    resourceType: 'runtime-instances',
+  })
+  return success(id, result)
 }
 
 export const enrollRuntimeHandler: PayloadHandler = async (req) => {
@@ -92,7 +118,28 @@ export const createRuntimeCommandHandler: PayloadHandler = async (req) => {
   if ('error' in result && result.error) {
     return failure(id, 409, result.error, '实例未声明该命令所需能力。')
   }
-  return success(id, { command: result.command })
+  await auditRuntimeMutation(req, {
+    action: 'runtime.command.create',
+    after: {
+      idempotencyKey: value.idempotencyKey,
+      instanceId: String(value.instanceId),
+      state: result.command.state,
+      type: value.type,
+    },
+    capability: 'runtime:command:create',
+    outcome: 'succeeded',
+    requestId: id,
+    resourceId: String(result.command.id),
+    resourceType: 'runtime-commands',
+  })
+  return success(id, {
+    command: {
+      id: String(result.command.id),
+      instanceId: String(value.instanceId),
+      state: result.command.state,
+      type: result.command.type,
+    },
+  })
 }
 
 export const runtimeCommandResultHandler: PayloadHandler = async (req) => {
@@ -110,7 +157,11 @@ export const runtimeCommandResultHandler: PayloadHandler = async (req) => {
 }
 
 export const runtimeControlEndpoints: Endpoint[] = [
-  { path: '/platform/v1/runtime/enrollments', method: 'post', handler: createRuntimeEnrollmentHandler },
+  {
+    path: '/platform/v1/runtime/enrollments',
+    method: 'post',
+    handler: createRuntimeEnrollmentHandler,
+  },
   { path: '/platform/v1/runtime/commands', method: 'post', handler: createRuntimeCommandHandler },
   { path: '/control/v1/enroll', method: 'post', handler: enrollRuntimeHandler },
   { path: '/control/v1/heartbeat', method: 'post', handler: runtimeHeartbeatHandler },

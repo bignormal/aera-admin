@@ -1,6 +1,6 @@
 import type { CollectionConfig } from 'payload'
 
-import { canManageCatalog, isAuthenticated } from '../access/adminAccess'
+import { canManageCatalog, capabilityAccess } from '../access/adminAccess'
 import { createAuditHooks } from '../domain/audit'
 
 const mediaAuditHooks = createAuditHooks({
@@ -15,7 +15,7 @@ export const Media: CollectionConfig = {
   access: {
     create: canManageCatalog,
     delete: canManageCatalog,
-    read: isAuthenticated,
+    read: capabilityAccess('content:media:read'),
     update: canManageCatalog,
   },
   hooks: {

@@ -76,8 +76,14 @@ describe('runtime control data model', () => {
     const commandState = RuntimeCommands.fields.find(
       (field) => 'name' in field && field.name === 'state',
     )
-    expect('access' in (deviceSecret || {}) && deviceSecret?.access?.read?.({} as never)).toBe(false)
-    expect('access' in (deviceSecret || {}) && deviceSecret?.access?.update?.({} as never)).toBe(false)
-    expect('access' in (commandState || {}) && commandState?.access?.update?.({} as never)).toBe(false)
+    expect(
+      deviceSecret && 'access' in deviceSecret && deviceSecret.access?.read?.({} as never),
+    ).toBe(false)
+    expect(
+      deviceSecret && 'access' in deviceSecret && deviceSecret.access?.update?.({} as never),
+    ).toBe(false)
+    expect(
+      commandState && 'access' in commandState && commandState.access?.update?.({} as never),
+    ).toBe(false)
   })
 })

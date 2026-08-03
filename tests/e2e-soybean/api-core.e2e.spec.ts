@@ -38,10 +38,7 @@ function upstream(data: unknown, requestId = 'e2e-platform-request') {
   }
 }
 
-async function loginViaUI(
-  page: Page,
-  user: { email: string; password: string } = testUser,
-) {
+async function loginViaUI(page: Page, user: { email: string; password: string } = testUser) {
   await page.goto('/admin/login')
   await page.getByTestId('admin-email').fill(user.email)
   await page.getByTestId('admin-password').fill(user.password)
@@ -57,7 +54,7 @@ async function installPlatformFixture(page: Page) {
   const user = { ...platformUser }
   const mutations: Array<{ body: unknown; operation: string }> = []
 
-  await page.route('**/api/platform/v1/*', async route => {
+  await page.route('**/api/platform/v1/*', async (route) => {
     const name = operation(route)
     if (name === 'status') {
       await route.continue()
@@ -177,6 +174,27 @@ test('manages users and AI groups without exposing the upstream admin key', asyn
   await page.goto('/admin/ai-resources/groups')
   await expect(page.getByRole('row').filter({ hasText: '默认模型分组' })).toBeVisible()
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('admin-key')
+})
+
+test('renders user JSON details with a configured code highlighter', async ({ page }) => {
+  const codeErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('[naive/code]')) {
+      codeErrors.push(message.text())
+    }
+  })
+
+  await installPlatformFixture(page)
+  await loginViaUI(page)
+  await page.goto('/admin/users')
+  await page
+    .getByRole('row')
+    .filter({ hasText: platformUser.email })
+    .getByRole('button', { name: '详情' })
+    .click()
+  await expect(page.locator('.n-code').first()).toBeVisible()
+
+  expect(codeErrors).toEqual([])
 })
 
 test('keeps auditor pages read-only and rejects publisher platform routes', async ({ page }) => {

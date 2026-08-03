@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
   createRuntimeCommandHandler,
@@ -13,15 +14,26 @@ import {
 import { parseHeartbeatInput } from '../../src/domain/runtime-control-service'
 import { getTestPayload } from '../helpers/payload'
 
-// 本套件依赖旧工作区的 hermes-studio 与 agentera-claw-runtime 真实客户端；
-// 在不包含这两个仓的工作区（如 aera 工作区）自动跳过。
+// Runtime 与 Studio 是独立交付物：分别探测、分别运行，避免任一客户端
+// 缺席时把另一个真实契约验证一起跳过。隔离工作树可通过环境变量显式指定。
 const studioSummaryModule = resolve(
   process.cwd(),
   '../hermes-studio/packages/server/src/services/platform-control-summary.ts',
 )
-const runtimeRoot = resolve(process.cwd(), '../agentera-claw-runtime')
-const externalClientsAvailable =
-  existsSync(studioSummaryModule) && existsSync(resolve(runtimeRoot, '.venv/bin/python'))
+const runtimeRoot = resolve(process.env.AERA_RUNTIME_ROOT || resolve(process.cwd(), '../aera-runtime'))
+const runtimePython = resolve(
+  process.env.AERA_RUNTIME_PYTHON || resolve(runtimeRoot, '.venv/bin/python'),
+)
+const runtimeClientAvailable =
+  existsSync(resolve(runtimeRoot, 'hermes_cli/platform_control_summary.py')) && existsSync(runtimePython)
+const studioClientAvailable = existsSync(studioSummaryModule)
+const runtimeHermesHome = runtimeClientAvailable
+  ? mkdtempSync(join(tmpdir(), 'aera-runtime-contract-'))
+  : undefined
+
+afterAll(() => {
+  if (runtimeHermesHome) rmSync(runtimeHermesHome, { force: true, recursive: true })
+})
 
 type StudioSummaryModule = {
   buildPlatformControlSummary: (input: Record<string, unknown>) => Record<string, unknown>
@@ -36,7 +48,7 @@ type ClientFixture = {
 
 function runtimeFixture(): ClientFixture {
   const output = execFileSync(
-    resolve(runtimeRoot, '.venv/bin/python'),
+    runtimePython,
     [
       '-c',
       [
@@ -46,7 +58,11 @@ function runtimeFixture(): ClientFixture {
         "print(json.dumps({'summary':build_platform_control_summary(config={}, resources=resources), 'health':build_health_check_result()}))",
       ].join(';'),
     ],
-    { cwd: runtimeRoot, encoding: 'utf8' },
+    {
+      cwd: runtimeRoot,
+      encoding: 'utf8',
+      env: { ...process.env, HERMES_HOME: runtimeHermesHome },
+    },
   )
   const parsed = JSON.parse(output) as Pick<ClientFixture, 'health' | 'summary'>
   return { ...parsed, instanceType: 'runtime' }
@@ -158,11 +174,18 @@ async function verifyClient(fixture: ClientFixture, index: number) {
   expect(JSON.stringify(stored)).not.toMatch(/private|prompt|conversation/i)
 }
 
-describe.skipIf(!externalClientsAvailable)('real Runtime and Studio platform-control clients', () => {
+describe.skipIf(!runtimeClientAvailable)('real Runtime platform-control client', () => {
   afterEach(clearRuntimeData)
 
-  it('uses one strict outbound heartbeat and health-check contract for both clients', async () => {
-    const fixtures = [runtimeFixture(), await studioFixture()]
-    for (const [index, fixture] of fixtures.entries()) await verifyClient(fixture, index)
+  it('uses the strict outbound heartbeat and health-check contract', async () => {
+    await verifyClient(runtimeFixture(), 0)
+  })
+})
+
+describe.skipIf(!studioClientAvailable)('real Studio platform-control client', () => {
+  afterEach(clearRuntimeData)
+
+  it('uses the strict outbound heartbeat and health-check contract', async () => {
+    await verifyClient(await studioFixture(), 1)
   })
 })

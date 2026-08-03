@@ -12,7 +12,12 @@ import { getTestPayload } from '../helpers/payload'
 
 async function clearRuntimeData() {
   const payload = await getTestPayload()
-  for (const collection of ['runtime-events', 'runtime-commands', 'runtime-instances'] as const) {
+  for (const collection of [
+    'runtime-events',
+    'runtime-commands',
+    'runtime-instances',
+    'audit-logs',
+  ] as const) {
     await payload.delete({ collection, overrideAccess: true, where: { id: { exists: true } } })
   }
 }
@@ -51,6 +56,138 @@ async function enrollment() {
 
 describe('runtime control endpoints', () => {
   afterEach(clearRuntimeData)
+
+  it('audits enrollment and command creation without persisting the one-time code', async () => {
+    const payload = await getTestPayload()
+    const enrollmentRequest = request({
+      body: { instanceType: 'runtime', name: 'Audited Runtime' },
+      headers: { 'x-request-id': 'runtime-enrollment-audit' },
+      user: { id: 1, role: 'super_admin' },
+    })
+    enrollmentRequest.payload = payload as never
+
+    const enrollmentResponse = await createRuntimeEnrollmentHandler(enrollmentRequest as never)
+    expect(enrollmentResponse.status).toBe(200)
+    const created = (await enrollmentResponse.json()).data as {
+      enrollmentCode: string
+      expiresAt: string
+      instanceId: string
+    }
+
+    const enrollmentAudit = await payload.find({
+      collection: 'audit-logs',
+      overrideAccess: true,
+      where: { requestId: { equals: 'runtime-enrollment-audit' } },
+    })
+    expect(enrollmentAudit.docs).toHaveLength(1)
+    expect(enrollmentAudit.docs[0]).toMatchObject({
+      action: 'runtime.enrollment.create',
+      actorId: '1',
+      actorRole: 'super_admin',
+      after: {
+        expiresAt: created.expiresAt,
+        instanceId: created.instanceId,
+        instanceType: 'runtime',
+        name: 'Audited Runtime',
+      },
+      capability: 'runtime:command:create',
+      outcome: 'succeeded',
+      requestId: 'runtime-enrollment-audit',
+      resourceId: created.instanceId,
+      resourceType: 'runtime-instances',
+    })
+    expect(JSON.stringify(enrollmentAudit.docs[0])).not.toContain(created.enrollmentCode)
+
+    const enrollRequest = request({
+      body: {
+        arch: 'arm64',
+        capabilities: ['diagnostics.health.read'],
+        deviceId: 'audited-device',
+        enrollmentCode: created.enrollmentCode,
+        instanceType: 'runtime',
+        os: 'darwin',
+        version: '1.0.0',
+      },
+    })
+    enrollRequest.payload = payload as never
+    expect((await enrollRuntimeHandler(enrollRequest as never)).status).toBe(200)
+
+    const commandRequest = request({
+      body: {
+        idempotencyKey: 'runtime-command-audit',
+        instanceId: created.instanceId,
+        type: 'health_check',
+      },
+      headers: { 'x-request-id': 'runtime-command-audit' },
+      user: { id: 1, role: 'super_admin' },
+    })
+    commandRequest.payload = payload as never
+    const commandResponse = await createRuntimeCommandHandler(commandRequest as never)
+    expect(commandResponse.status).toBe(200)
+    const command = (await commandResponse.json()).data.command as { id: number | string }
+
+    const commandAudit = await payload.find({
+      collection: 'audit-logs',
+      overrideAccess: true,
+      where: { requestId: { equals: 'runtime-command-audit' } },
+    })
+    expect(commandAudit.docs).toHaveLength(1)
+    expect(commandAudit.docs[0]).toMatchObject({
+      action: 'runtime.command.create',
+      actorId: '1',
+      actorRole: 'super_admin',
+      after: {
+        idempotencyKey: 'runtime-command-audit',
+        instanceId: created.instanceId,
+        state: 'queued',
+        type: 'health_check',
+      },
+      capability: 'runtime:command:create',
+      outcome: 'succeeded',
+      requestId: 'runtime-command-audit',
+      resourceId: String(command.id),
+      resourceType: 'runtime-commands',
+    })
+  })
+
+  it('returns a bounded command envelope without service-only Runtime fields', async () => {
+    const payload = await getTestPayload()
+    const created = await enrollment()
+    const enrollRequest = request({
+      body: {
+        arch: 'arm64',
+        capabilities: ['diagnostics.health.read'],
+        deviceId: 'bounded-response-device',
+        enrollmentCode: created.enrollmentCode,
+        instanceType: 'runtime',
+        os: 'darwin',
+        version: '1.0.0',
+      },
+    })
+    enrollRequest.payload = payload as never
+    expect((await enrollRuntimeHandler(enrollRequest as never)).status).toBe(200)
+
+    const commandRequest = request({
+      body: {
+        idempotencyKey: 'bounded-command-response',
+        instanceId: created.instanceId,
+        type: 'health_check',
+      },
+      user: { id: 1, role: 'super_admin' },
+    })
+    commandRequest.payload = payload as never
+    const response = await createRuntimeCommandHandler(commandRequest as never)
+    expect(response.status).toBe(200)
+
+    const command = (await response.json()).data.command
+    expect(command).toEqual({
+      id: expect.any(String),
+      instanceId: created.instanceId,
+      state: 'queued',
+      type: 'health_check',
+    })
+    expect(JSON.stringify(command)).not.toMatch(/commandKey|createdBy|hash|secret|session/i)
+  })
 
   it('uses a one-time enrollment code and stores only secret hashes', async () => {
     const payload = await getTestPayload()
@@ -148,7 +285,9 @@ describe('runtime control endpoints', () => {
     heartbeatReq.payload = payload as never
     const accepted = await runtimeHeartbeatHandler(heartbeatReq as never)
     expect(accepted.status).toBe(200)
-    expect(await accepted.json()).toMatchObject({ data: { command: null, nextHeartbeatSeconds: 60 } })
+    expect(await accepted.json()).toMatchObject({
+      data: { command: null, nextHeartbeatSeconds: 60 },
+    })
     const stored = await payload.findByID({
       collection: 'runtime-instances',
       id: created.instanceId,
@@ -203,17 +342,27 @@ describe('runtime control endpoints', () => {
     heartbeatReq.payload = payload as never
     const first = await (await runtimeHeartbeatHandler(heartbeatReq as never)).json()
     expect(first.data.command).toMatchObject({ type: 'health_check' })
-    expect((await (await runtimeHeartbeatHandler(heartbeatReq as never)).json()).data.command).toBeNull()
+    expect(
+      (await (await runtimeHeartbeatHandler(heartbeatReq as never)).json()).data.command,
+    ).toBeNull()
 
     const resultReq = request({
-      body: { code: 'HEALTHY', state: 'succeeded', summary: { gateway: 'healthy', logs: 'must reject' } },
+      body: {
+        code: 'HEALTHY',
+        state: 'succeeded',
+        summary: { gateway: 'healthy', logs: 'must reject' },
+      },
       headers: { authorization: `Bearer ${secret}`, 'x-agentera-instance-id': created.instanceId },
       routeParams: { id: String(first.data.command.id) },
     })
     resultReq.payload = payload as never
     expect((await runtimeCommandResultHandler(resultReq as never)).status).toBe(400)
 
-    resultReq.json = async () => ({ code: 'HEALTHY', state: 'succeeded', summary: { gateway: 'healthy' } })
+    resultReq.json = async () => ({
+      code: 'HEALTHY',
+      state: 'succeeded',
+      summary: { gateway: 'healthy' },
+    })
     expect((await runtimeCommandResultHandler(resultReq as never)).status).toBe(200)
   })
 })

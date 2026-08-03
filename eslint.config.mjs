@@ -27,6 +27,7 @@ const eslintConfig = [
     ignores: [
       '.next/**',
       '.next-soybean-e2e/**',
+      '.tmp/**',
       '.worktrees/**',
       'admin-web/**',
       'playwright-report/**',

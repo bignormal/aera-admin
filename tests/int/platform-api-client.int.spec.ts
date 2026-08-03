@@ -155,4 +155,22 @@ describe('platform API upstream client', () => {
       nested: { client_secret: '[REDACTED]', items: [{ proxy_password: '[REDACTED]' }] },
     })
   })
+
+  it('preserves token usage metrics while redacting credential tokens', () => {
+    expect(
+      redactExternalData({
+        access_token: 'access-secret',
+        completion_tokens: 21,
+        prompt_tokens: 13,
+        refreshToken: 'refresh-secret',
+        total_tokens: 34,
+      }),
+    ).toEqual({
+      access_token: '[REDACTED]',
+      completion_tokens: 21,
+      prompt_tokens: 13,
+      refreshToken: '[REDACTED]',
+      total_tokens: 34,
+    })
+  })
 })
