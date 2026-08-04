@@ -31,6 +31,7 @@ export type AuditEvent = {
   before?: unknown
   capability: Capability
   errorCode?: string
+  operationId?: string
   outcome: 'succeeded' | 'failed'
   requestId?: string
   resourceId?: string
@@ -109,6 +110,7 @@ export async function appendAuditLog(req: PayloadRequest, event: AuditEvent): Pr
       ip: requestIP(req),
       occurredAt: new Date().toISOString(),
       outcome: event.outcome,
+      operationId: event.operationId,
       requestId: event.requestId ?? header(req, 'x-request-id') ?? randomUUID(),
       resourceId: event.resourceId,
       resourceName: event.resourceName,

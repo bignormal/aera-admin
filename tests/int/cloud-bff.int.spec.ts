@@ -1,6 +1,7 @@
 import { generateKeyPairSync, verify as verifyRaw } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 
+import { PlatformAPIError } from '../../src/platform-api/client'
 import { createCloudHandler } from '../../src/platform-api/cloud/handler'
 import { getCloudAdminConfig } from '../../src/platform-api/cloud/config'
 import { cloudOperations, type CloudOperation } from '../../src/platform-api/cloud/operations'
@@ -187,6 +188,8 @@ describe('cloud operation registry', () => {
 
 type HandlerRequestOptions = {
   body?: unknown
+  create?: ReturnType<typeof vi.fn>
+  find?: ReturnType<typeof vi.fn>
   findByID?: ReturnType<typeof vi.fn>
   method?: string
   operation: string
@@ -203,7 +206,8 @@ function handlerRequest(options: HandlerRequestOptions) {
     json: vi.fn().mockResolvedValue(options.body),
     method: options.method || 'GET',
     payload: {
-      create: vi.fn().mockResolvedValue({ id: 1 }),
+      create: options.create || vi.fn().mockResolvedValue({ id: 1 }),
+      find: options.find || vi.fn().mockResolvedValue({ docs: [] }),
       findByID: options.findByID || vi.fn().mockResolvedValue({ id: 7 }),
       update: options.update || vi.fn().mockResolvedValue({ id: 1 }),
     },
@@ -267,6 +271,400 @@ describe('cloud BFF handler', () => {
     expect(call.body.operation_id).toMatch(/^[0-9a-f-]{36}$/)
     expect(call.idempotencyKey).toBe(call.body.operation_id)
     expect(call.actor).toBeUndefined()
+  })
+
+  it('persists a durable receipt before sending a mutation with the same operation id', async () => {
+    const events: string[] = []
+    const create = vi.fn().mockImplementation(({ collection, data }) => {
+      events.push(`create:${collection}`)
+      return Promise.resolve({ ...data, id: 11 })
+    })
+    const upstream = vi.fn().mockImplementation((request) => {
+      events.push('upstream')
+      return Promise.resolve({
+        data: { operation_id: request.idempotencyKey, status: 'succeeded' },
+      })
+    })
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, note: '滥用', reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    expect(events.slice(0, 2)).toEqual(['create:cloud-operation-receipts', 'upstream'])
+    const receipt = create.mock.calls[0][0]
+    const request = upstream.mock.calls[0][0]
+    expect(receipt).toMatchObject({
+      collection: 'cloud-operation-receipts',
+      data: {
+        actorAdminId: actorUUID,
+        actorRole: 'operator',
+        operationKey: 'revokeCloudSession',
+        requestId: 'cloud-request-1',
+        status: 'pending',
+      },
+      overrideAccess: true,
+    })
+    expect(receipt.data.operationId).toBe(request.idempotencyKey)
+    expect(receipt.data.operationId).toBe(request.body.operation_id)
+  })
+
+  it('does not contact Cloud when the durable receipt cannot be persisted', async () => {
+    const create = vi.fn().mockRejectedValue(new Error('sqlite unavailable'))
+    const upstream = vi.fn()
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+      }) as never,
+    )
+
+    expect(response.status).toBe(503)
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'LOCAL_OPERATION_RECEIPT_UNAVAILABLE' },
+    })
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('stores the replayable allowlisted request without transport credentials', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 11 })
+    const upstream = vi.fn().mockImplementation((request) =>
+      Promise.resolve({
+        data: {
+          operation_id: request.idempotencyKey,
+          status: 'succeeded',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+      }),
+    )
+    const handler = createCloudHandler(upstream)
+
+    await handler(
+      handlerRequest({
+        body: { expected_revision: 3, note: '滥用', reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+      }) as never,
+    )
+
+    const receipt = create.mock.calls[0][0].data
+    expect(receipt).toMatchObject({
+      capability: 'cloud:sessions:write',
+      localActorId: '7',
+      localActorRole: 'operations_admin',
+      request: {
+        actor: null,
+        body: {
+          actor_admin_id: actorUUID,
+          expected_revision: 3,
+          note: '滥用',
+          reason_code: 'abuse_report',
+          request_id: 'cloud-request-1',
+        },
+        method: 'POST',
+        path: `/sessions/${actorUUID}/revoke`,
+        query: '',
+        requestId: 'cloud-request-1',
+      },
+    })
+    expect(receipt.request.idempotencyKey).toBe(receipt.operationId)
+    expect(receipt.request.body.operation_id).toBe(receipt.operationId)
+    expect(receipt.request).not.toHaveProperty('headers')
+    expect(receipt.request).not.toHaveProperty('signal')
+    expect(JSON.stringify(receipt.request)).not.toContain('authorization')
+  })
+
+  it('queries Cloud immediately by operation id after an ambiguous mutation result', async () => {
+    const upstream = vi.fn().mockImplementation((request) => {
+      if (request.method === 'POST') {
+        throw new PlatformAPIError('UPSTREAM_TIMEOUT', 504, request.requestId)
+      }
+      return Promise.resolve({
+        data: {
+          operation_id: request.path.split('/').at(-1),
+          status: 'succeeded',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+        upstreamRequestId: 'cloud-reconcile-1',
+      })
+    })
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstream).toHaveBeenCalledTimes(2)
+    const mutation = upstream.mock.calls[0][0]
+    expect(upstream.mock.calls[1][0]).toMatchObject({
+      method: 'GET',
+      path: `/operations/${mutation.idempotencyKey}`,
+      requestId: 'cloud-request-1',
+    })
+    await expect(response.json()).resolves.toMatchObject({
+      data: { operation_id: mutation.idempotencyKey, status: 'succeeded' },
+      meta: { upstreamRequestId: 'cloud-reconcile-1' },
+    })
+  })
+
+  it('keeps an unresolved ambiguous result pending without writing a false failure audit', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 11 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 11 }] })
+    const upstream = vi.fn().mockImplementation((request) => {
+      throw new PlatformAPIError('UPSTREAM_TIMEOUT', 504, request.requestId)
+    })
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(202)
+    expect(upstream).toHaveBeenCalledTimes(2)
+    expect(create).toHaveBeenCalledTimes(1)
+    const operationId = upstream.mock.calls[0][0].idempotencyKey
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        collection: 'cloud-operation-receipts',
+        data: expect.objectContaining({
+          lastErrorCode: 'UPSTREAM_TIMEOUT',
+          status: 'reconciling',
+        }),
+        where: { operationId: { equals: operationId } },
+      }),
+    )
+    await expect(response.json()).resolves.toMatchObject({
+      data: { operation_id: operationId, status: 'queued' },
+    })
+  })
+
+  it('records a terminal Cloud result on the durable receipt', async () => {
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 11 }] })
+    const upstream = vi.fn().mockImplementation((request) =>
+      Promise.resolve({
+        data: {
+          administrative_revision: 4,
+          operation_id: request.idempotencyKey,
+          status: 'succeeded',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+        upstreamRequestId: 'cloud-terminal-1',
+      }),
+    )
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    const operationId = upstream.mock.calls[0][0].idempotencyKey
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'cloud-operation-receipts',
+        data: expect.objectContaining({
+          administrativeRevision: 4,
+          cloudUpdatedAt: '2026-08-04T03:00:00.000Z',
+          status: 'succeeded',
+          upstreamRequestId: 'cloud-terminal-1',
+        }),
+        overrideAccess: true,
+        where: { operationId: { equals: operationId } },
+      }),
+    )
+  })
+
+  it('keeps a Cloud success reconcilable when the local audit write fails', async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 11 })
+      .mockRejectedValueOnce(new Error('audit sqlite write failed'))
+    const find = vi.fn().mockResolvedValue({ docs: [] })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 11 }] })
+    const upstream = vi.fn().mockImplementation((request) =>
+      Promise.resolve({
+        data: {
+          operation_id: request.idempotencyKey,
+          status: 'succeeded',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+      }),
+    )
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        create,
+        find,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstream).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        collection: 'cloud-operation-receipts',
+        data: expect.objectContaining({
+          cloudStatus: 'succeeded',
+          lastErrorCode: 'LOCAL_AUDIT_PENDING',
+          status: 'reconciling',
+        }),
+      }),
+    )
+  })
+
+  it('returns the Cloud success once when the receipt finalization write fails', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 11 })
+    const update = vi.fn().mockRejectedValue(new Error('receipt finalization write failed'))
+    const upstream = vi.fn().mockImplementation((request) =>
+      Promise.resolve({
+        data: {
+          operation_id: request.idempotencyKey,
+          status: 'succeeded',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+      }),
+    )
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstream).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledTimes(2)
+  })
+
+  it('closes the receipt after a definitive Cloud rejection', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 11 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 11 }] })
+    const upstream = vi
+      .fn()
+      .mockRejectedValue(new PlatformAPIError('INVALID_REQUEST', 400, 'cloud-request-1'))
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(400)
+    expect(upstream).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        collection: 'cloud-operation-receipts',
+        data: expect.objectContaining({
+          auditCompletedAt: expect.any(String),
+          errorCode: 'INVALID_REQUEST',
+          status: 'failed',
+        }),
+      }),
+    )
+  })
+
+  it('reconciles a 409 response into the Cloud conflict terminal state', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 11 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 11 }] })
+    const upstream = vi.fn().mockImplementation((request) => {
+      if (request.method !== 'GET') {
+        throw new PlatformAPIError('STATE_CONFLICT', 409, request.requestId)
+      }
+      return Promise.resolve({
+        data: {
+          error_code: 'USER_STATE_CONFLICT',
+          operation_id: request.path.split('/').at(-1),
+          status: 'conflict',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+      })
+    })
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: { expected_revision: 3, reason_code: 'abuse_report' },
+        create,
+        method: 'POST',
+        operation: 'revokeCloudSession',
+        query: `?session_id=${actorUUID}`,
+        role: 'operations_admin',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    expect(upstream).toHaveBeenCalledTimes(2)
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        collection: 'cloud-operation-receipts',
+        data: expect.objectContaining({
+          cloudStatus: 'conflict',
+          errorCode: 'USER_STATE_CONFLICT',
+          status: 'conflict',
+        }),
+      }),
+    )
   })
 
   it('requires an approval id for account disable commands', async () => {
@@ -453,7 +851,15 @@ describe('cloud BFF handler', () => {
         targetVersionId: '7b1c9f24-8dae-4fb5-c036-89abcdef0123',
       })
     })
-    const upstream = vi.fn().mockResolvedValue({ data: { operation_id: 'cloud-op-7' } })
+    const upstream = vi.fn().mockImplementation((request) =>
+      Promise.resolve({
+        data: {
+          operation_id: request.idempotencyKey,
+          status: 'succeeded',
+          updated_at: '2026-08-04T03:00:00.000Z',
+        },
+      }),
+    )
     const handler = createCloudHandler(upstream)
 
     const response = await handler(
@@ -485,7 +891,7 @@ describe('cloud BFF handler', () => {
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
         collection: 'official-rollback-requests',
-        data: expect.objectContaining({ operationId: 'cloud-op-7', status: 'executed' }),
+        data: expect.objectContaining({ operationId: call.idempotencyKey, status: 'executed' }),
         id: 42,
       }),
     )

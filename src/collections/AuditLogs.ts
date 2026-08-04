@@ -41,6 +41,13 @@ export const AuditLogs: CollectionConfig = {
     { name: 'resourceId', label: '资源 ID', type: 'text', index: true },
     { name: 'resourceName', label: '资源名称', type: 'text' },
     { name: 'requestId', label: '请求编号', type: 'text', index: true, required: true },
+    {
+      name: 'operationId',
+      label: '云端操作 ID',
+      type: 'text',
+      index: true,
+      unique: true,
+    },
     { name: 'upstreamRequestId', label: '上游请求编号', type: 'text', index: true },
     {
       name: 'outcome',
