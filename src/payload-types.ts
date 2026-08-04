@@ -76,6 +76,7 @@ export interface Config {
     'pet-assets': PetAsset;
     'integration-settings': IntegrationSetting;
     'audit-logs': AuditLog;
+    'cloud-operation-receipts': CloudOperationReceipt;
     'official-rollback-requests': OfficialRollbackRequest;
     'runtime-instances': RuntimeInstance;
     'runtime-releases': RuntimeRelease;
@@ -97,6 +98,7 @@ export interface Config {
     'pet-assets': PetAssetsSelect<false> | PetAssetsSelect<true>;
     'integration-settings': IntegrationSettingsSelect<false> | IntegrationSettingsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
+    'cloud-operation-receipts': CloudOperationReceiptsSelect<false> | CloudOperationReceiptsSelect<true>;
     'official-rollback-requests': OfficialRollbackRequestsSelect<false> | OfficialRollbackRequestsSelect<true>;
     'runtime-instances': RuntimeInstancesSelect<false> | RuntimeInstancesSelect<true>;
     'runtime-releases': RuntimeReleasesSelect<false> | RuntimeReleasesSelect<true>;
@@ -390,6 +392,7 @@ export interface AuditLog {
   resourceId?: string | null;
   resourceName?: string | null;
   requestId: string;
+  operationId?: string | null;
   upstreamRequestId?: string | null;
   outcome: 'succeeded' | 'failed';
   errorCode?: string | null;
@@ -414,6 +417,48 @@ export interface AuditLog {
     | boolean
     | null;
   occurredAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "cloud-operation-receipts".
+ */
+export interface CloudOperationReceipt {
+  id: number;
+  operationId: string;
+  operationKey: string;
+  requestId: string;
+  actorAdminId: string;
+  actorRole: string;
+  localActorId: string;
+  localActorRole: string;
+  capability: string;
+  request:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  rollbackRequestId?: string | null;
+  status: 'pending' | 'reconciling' | 'succeeded' | 'failed' | 'conflict';
+  administrativeRevision?: number | null;
+  cloudStatus?: ('queued' | 'executing' | 'succeeded' | 'failed' | 'conflict') | null;
+  cloudUpdatedAt?: string | null;
+  errorCode?: string | null;
+  lastErrorCode?: string | null;
+  definitiveFailure: boolean;
+  attemptCount: number;
+  lastAttemptAt?: string | null;
+  nextAttemptAt?: string | null;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  auditCompletedAt?: string | null;
+  rollbackCompletedAt?: string | null;
+  upstreamRequestId?: string | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -619,6 +664,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'audit-logs';
         value: number | AuditLog;
+      } | null)
+    | ({
+        relationTo: 'cloud-operation-receipts';
+        value: number | CloudOperationReceipt;
       } | null)
     | ({
         relationTo: 'official-rollback-requests';
@@ -861,6 +910,7 @@ export interface AuditLogsSelect<T extends boolean = true> {
   resourceId?: T;
   resourceName?: T;
   requestId?: T;
+  operationId?: T;
   upstreamRequestId?: T;
   outcome?: T;
   errorCode?: T;
@@ -869,6 +919,39 @@ export interface AuditLogsSelect<T extends boolean = true> {
   before?: T;
   after?: T;
   occurredAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "cloud-operation-receipts_select".
+ */
+export interface CloudOperationReceiptsSelect<T extends boolean = true> {
+  operationId?: T;
+  operationKey?: T;
+  requestId?: T;
+  actorAdminId?: T;
+  actorRole?: T;
+  localActorId?: T;
+  localActorRole?: T;
+  capability?: T;
+  request?: T;
+  rollbackRequestId?: T;
+  status?: T;
+  administrativeRevision?: T;
+  cloudStatus?: T;
+  cloudUpdatedAt?: T;
+  errorCode?: T;
+  lastErrorCode?: T;
+  definitiveFailure?: T;
+  attemptCount?: T;
+  lastAttemptAt?: T;
+  nextAttemptAt?: T;
+  leaseOwner?: T;
+  leaseExpiresAt?: T;
+  auditCompletedAt?: T;
+  rollbackCompletedAt?: T;
+  upstreamRequestId?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

@@ -10,6 +10,12 @@ import { redactExternalData } from '../redaction'
 import type { PlatformFailure, PlatformSuccess } from '../types'
 import { type CloudUpstreamRequest, requestCloudUpstream } from './client'
 import { type CloudOperation, cloudOperations, isCloudOperationKey } from './operations'
+import {
+  persistPendingCloudOperationReceipt,
+  recordCloudOperationDefinitiveFailure,
+  recordCloudOperationReconciliationPending,
+  recordCloudOperationReceiptResult,
+} from './receipts'
 import type { CloudActorContext } from './token'
 
 type CloudUpstreamRequester = <T>(request: CloudUpstreamRequest) => Promise<{
@@ -276,11 +282,22 @@ function isPreparationFailure(
   return typeof (value as PreparationFailure).errorCode === 'string'
 }
 
+function isAmbiguousMutationError(error: unknown): boolean {
+  return (
+    error instanceof PlatformAPIError &&
+    (error.code === 'UPSTREAM_ABORTED' ||
+      error.code === 'UPSTREAM_NETWORK_ERROR' ||
+      error.code === 'UPSTREAM_TIMEOUT' ||
+      error.status === 409 ||
+      error.status >= 500)
+  )
+}
+
 async function markRollbackExecuted(
   req: PayloadRequest,
   rollbackRequestId: number | string,
   operationId: string | undefined,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await req.payload.update({
       collection: 'official-rollback-requests',
@@ -293,8 +310,9 @@ async function markRollbackExecuted(
       overrideAccess: true,
       req,
     })
+    return true
   } catch {
-    // 云端已回滚成功；本地状态标记失败不影响上游结果，由审计日志兜底。
+    return false
   }
 }
 
@@ -305,12 +323,13 @@ async function auditCloudMutation(
     capability: CloudOperation['capability']
     errorCode?: string
     operation: string
+    operationId: string
     outcome: 'failed' | 'succeeded'
     params: Record<string, string>
     requestId: string
     upstreamRequestId?: string
   },
-): Promise<void> {
+): Promise<boolean> {
   try {
     await appendAuditLog(req, {
       action: `cloud.${options.operation}`,
@@ -318,13 +337,25 @@ async function auditCloudMutation(
       capability: options.capability,
       errorCode: options.errorCode,
       outcome: options.outcome,
+      operationId: options.operationId,
       requestId: options.requestId,
       resourceId: Object.values(options.params)[0],
       resourceType: cloudResourceType,
       upstreamRequestId: options.upstreamRequestId,
     })
+    return true
   } catch {
-    // 审计暂不可用时保留上游稳定结果。
+    try {
+      const existing = await req.payload.find({
+        collection: 'audit-logs',
+        limit: 1,
+        overrideAccess: true,
+        where: { operationId: { equals: options.operationId } },
+      })
+      return existing.docs.length > 0
+    } catch {
+      return false
+    }
   }
 }
 
@@ -404,33 +435,165 @@ export function createCloudHandler(
       return failure(currentRequestID, prepared.status, prepared.errorCode, prepared.message)
     }
 
-    try {
-      const result = await upstream({
-        actor: prepared.actor,
-        body: prepared.body,
-        idempotencyKey: prepared.idempotencyKey,
-        method: operation.method,
-        path: operation.upstreamPath(params),
-        query: url.searchParams,
-        requestId: currentRequestID,
-        signal: req.signal,
-      })
-      if (operation.kind === 'official-rollback' && prepared.rollbackRequestId !== undefined) {
-        const data = asRecord(result.data)
-        const operationId =
-          typeof data?.operation_id === 'string' ? data.operation_id : prepared.idempotencyKey
-        await markRollbackExecuted(req, prepared.rollbackRequestId, operationId)
-      }
-      if (operation.mutation) {
-        await auditCloudMutation(req, {
-          after: prepared.body,
+    if (operation.mutation && prepared.idempotencyKey) {
+      try {
+        await persistPendingCloudOperationReceipt(req, {
+          actorAdminId: identity.adminUUID,
+          actorRole: identity.cloudRole,
           capability: operation.capability,
-          operation: operationKey,
-          outcome: 'succeeded',
-          params,
+          localActorId: String(req.user.id),
+          localActorRole: req.user.role,
+          operationId: prepared.idempotencyKey,
+          operationKey,
+          request: {
+            actor: prepared.actor ?? null,
+            body: prepared.body,
+            idempotencyKey: prepared.idempotencyKey,
+            method: operation.method,
+            path: operation.upstreamPath(params),
+            query: url.searchParams.toString(),
+            requestId: currentRequestID,
+          },
           requestId: currentRequestID,
-          upstreamRequestId: result.upstreamRequestId,
+          rollbackRequestId:
+            prepared.rollbackRequestId === undefined
+              ? undefined
+              : String(prepared.rollbackRequestId),
         })
+      } catch {
+        return failure(
+          currentRequestID,
+          503,
+          'LOCAL_OPERATION_RECEIPT_UNAVAILABLE',
+          '本地操作记录暂时不可用，未向 Aera Cloud 提交变更。',
+        )
+      }
+    }
+
+    try {
+      let result: Awaited<ReturnType<CloudUpstreamRequester>>
+      try {
+        result = await upstream({
+          actor: prepared.actor,
+          body: prepared.body,
+          idempotencyKey: prepared.idempotencyKey,
+          method: operation.method,
+          path: operation.upstreamPath(params),
+          query: url.searchParams,
+          requestId: currentRequestID,
+          signal: req.signal,
+        })
+      } catch (error) {
+        if (!operation.mutation || !prepared.idempotencyKey || !isAmbiguousMutationError(error)) {
+          throw error
+        }
+        try {
+          result = await upstream({
+            method: 'GET',
+            path: `/operations/${prepared.idempotencyKey}`,
+            requestId: currentRequestID,
+          })
+        } catch (reconciliationError) {
+          const attemptedAt = new Date()
+          const errorCode =
+            reconciliationError instanceof PlatformAPIError
+              ? reconciliationError.code
+              : 'UPSTREAM_UNEXPECTED_ERROR'
+          try {
+            await recordCloudOperationReconciliationPending(req, {
+              attemptedAt: attemptedAt.toISOString(),
+              errorCode,
+              nextAttemptAt: new Date(attemptedAt.getTime() + 5_000).toISOString(),
+              operationId: prepared.idempotencyKey,
+            })
+          } catch {
+            // The original pending receipt remains durable and will be recovered on restart.
+          }
+          const pending: PlatformSuccess<
+            { operation_id: string; status: 'queued'; updated_at: string },
+            Record<string, never>
+          > = {
+            data: {
+              operation_id: prepared.idempotencyKey,
+              status: 'queued',
+              updated_at: attemptedAt.toISOString(),
+            },
+            meta: {},
+            requestId: currentRequestID,
+          }
+          return Response.json(pending, { status: 202 })
+        }
+      }
+      if (operation.mutation && prepared.idempotencyKey) {
+        const operationResult = asRecord(result.data)
+        const operationId = operationResult?.operation_id
+        const cloudStatus = operationResult?.status
+        const cloudUpdatedAt = operationResult?.updated_at
+        const validCloudStatus =
+          cloudStatus === 'queued' ||
+          cloudStatus === 'executing' ||
+          cloudStatus === 'succeeded' ||
+          cloudStatus === 'failed' ||
+          cloudStatus === 'conflict'
+        if (
+          operationResult &&
+          operationId === prepared.idempotencyKey &&
+          validCloudStatus &&
+          typeof cloudUpdatedAt === 'string'
+        ) {
+          const terminal =
+            cloudStatus === 'succeeded' || cloudStatus === 'failed' || cloudStatus === 'conflict'
+          const rollbackCompleted =
+            cloudStatus !== 'succeeded' ||
+            operation.kind !== 'official-rollback' ||
+            prepared.rollbackRequestId === undefined ||
+            (await markRollbackExecuted(req, prepared.rollbackRequestId, operationId))
+          const auditCompleted =
+            !terminal ||
+            (await auditCloudMutation(req, {
+              after: prepared.body,
+              capability: operation.capability,
+              errorCode:
+                typeof operationResult.error_code === 'string'
+                  ? operationResult.error_code
+                  : undefined,
+              operation: operationKey,
+              operationId,
+              outcome: cloudStatus === 'succeeded' ? 'succeeded' : 'failed',
+              params,
+              requestId: currentRequestID,
+              upstreamRequestId: result.upstreamRequestId,
+            }))
+          const localComplete = terminal && rollbackCompleted && auditCompleted
+          const completedAt = new Date().toISOString()
+          try {
+            await recordCloudOperationReceiptResult(req, {
+              administrativeRevision:
+                typeof operationResult.administrative_revision === 'number'
+                  ? operationResult.administrative_revision
+                  : undefined,
+              auditCompletedAt: auditCompleted && terminal ? completedAt : undefined,
+              cloudStatus,
+              cloudUpdatedAt,
+              errorCode:
+                typeof operationResult.error_code === 'string'
+                  ? operationResult.error_code
+                  : undefined,
+              lastErrorCode: !rollbackCompleted
+                ? 'LOCAL_ROLLBACK_PENDING'
+                : !auditCompleted
+                  ? 'LOCAL_AUDIT_PENDING'
+                  : undefined,
+              operationId,
+              rollbackCompletedAt: rollbackCompleted && terminal ? completedAt : undefined,
+              status: localComplete ? cloudStatus : 'reconciling',
+              upstreamRequestId: result.upstreamRequestId,
+            })
+          } catch {
+            // The original pending receipt remains durable; the process loop
+            // will query Cloud and finish local side effects without replaying.
+          }
+        }
       }
       const response: PlatformSuccess<unknown, { upstreamRequestId?: string }> = {
         data: redactExternalData(result.data),
@@ -444,16 +607,28 @@ export function createCloudHandler(
           ? error
           : new PlatformAPIError('UPSTREAM_UNEXPECTED_ERROR', 502, currentRequestID)
       if (operation.mutation) {
-        await auditCloudMutation(req, {
+        const auditCompleted = await auditCloudMutation(req, {
           after: prepared.body,
           capability: operation.capability,
           errorCode: platformError.code,
           operation: operationKey,
+          operationId: prepared.idempotencyKey || currentRequestID,
           outcome: 'failed',
           params,
           requestId: currentRequestID,
           upstreamRequestId: platformError.upstreamRequestId,
         })
+        if (prepared.idempotencyKey) {
+          try {
+            await recordCloudOperationDefinitiveFailure(req, {
+              auditCompleted,
+              errorCode: platformError.code,
+              operationId: prepared.idempotencyKey,
+            })
+          } catch {
+            // The pending receipt remains available for startup recovery.
+          }
+        }
       }
       return failure(
         currentRequestID,

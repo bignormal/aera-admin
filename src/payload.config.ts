@@ -9,6 +9,7 @@ import sharp from 'sharp'
 import { Admins } from './collections/Admins'
 import { AgentTemplates } from './collections/AgentTemplates'
 import { AuditLogs } from './collections/AuditLogs'
+import { CloudOperationReceipts } from './collections/CloudOperationReceipts'
 import { ExpertCategories } from './collections/ExpertCategories'
 import { IntegrationSettings } from './collections/IntegrationSettings'
 import { Media } from './collections/Media'
@@ -27,7 +28,9 @@ import { platformEndpoints } from './endpoints/platform'
 import { platformReadinessEndpoint } from './endpoints/platform-readiness'
 import { platformStatusEndpoint } from './endpoints/platform-status'
 import { runtimeControlEndpoints } from './endpoints/runtime-control'
+import { migrations } from './migrations'
 import { securityEndpoints } from './endpoints/security'
+import { startCloudOperationReconciliation } from './platform-api/cloud/receipts'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -56,6 +59,7 @@ export default buildConfig({
     PetAssets,
     IntegrationSettings,
     AuditLogs,
+    CloudOperationReceipts,
     OfficialRollbackRequests,
     RuntimeInstances,
     RuntimeReleases,
@@ -64,9 +68,11 @@ export default buildConfig({
   ],
   csrf: adminWebURL ? [adminWebURL] : [],
   db: sqliteAdapter({
+    busyTimeout: 5_000,
     client: {
       url: process.env.DATABASE_URL || 'file:./agentera-admin.db',
     },
+    prodMigrations: migrations,
     wal: true,
   }),
   editor: lexicalEditor(),
@@ -83,6 +89,9 @@ export default buildConfig({
   i18n: {
     fallbackLanguage: 'zh',
     supportedLanguages: { zh },
+  },
+  onInit: (payload) => {
+    if (!process.env.VITEST) startCloudOperationReconciliation({ payload })
   },
   secret: process.env.PAYLOAD_SECRET || '',
   serverURL: process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000',
