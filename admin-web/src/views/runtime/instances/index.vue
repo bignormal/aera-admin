@@ -19,6 +19,7 @@ defineOptions({ name: 'RuntimeInstancesPage' });
 const { can } = useCapability();
 const loading = ref(false);
 const state = ref<'empty' | 'error' | 'forbidden' | 'loading' | 'ready' | 'unavailable'>('loading');
+const errorDescription = ref('');
 const rows = ref<RuntimeInstance[]>([]);
 const total = ref(0);
 const query = reactive<RuntimeInstanceQuery>({
@@ -126,6 +127,7 @@ async function load() {
   controller = new AbortController();
   normalizeSearch();
   loading.value = true;
+  errorDescription.value = '';
   if (!rows.value.length) state.value = 'loading';
   try {
     const result = await listRuntimeInstances(query, controller.signal);
@@ -134,9 +136,15 @@ async function load() {
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return;
-    if (error instanceof CloudServiceError && error.kind === 'forbidden') state.value = 'forbidden';
-    else if (error instanceof CloudServiceError && error.kind === 'backend-unavailable') state.value = 'unavailable';
-    else state.value = 'error';
+    if (error instanceof CloudServiceError) {
+      const suffix = error.requestId ? `（请求 ID：${error.requestId}）` : '';
+      errorDescription.value = `${error.message}${suffix}`;
+      if (error.kind === 'forbidden') state.value = 'forbidden';
+      else if (error.kind === 'backend-unavailable') state.value = 'unavailable';
+      else state.value = 'error';
+    } else {
+      state.value = 'error';
+    }
   } finally {
     loading.value = false;
   }
@@ -187,7 +195,7 @@ onBeforeUnmount(() => controller?.abort());
     </template>
 
     <NCard :bordered="false" class="card-wrapper">
-      <ResourceState :state="state">
+      <ResourceState :state="state" :description="errorDescription">
         <template #actions><NButton @click="load">重试</NButton></template>
         <div class="max-w-full overflow-x-auto">
           <NDataTable
