@@ -247,7 +247,7 @@ const sessionColumns: DataTableColumns<CloudSession> = [
 
 <template>
   <NDrawer v-model:show="show" :width="860" placement="right">
-    <NDrawerContent :title="`云端用户详情`" closable>
+    <NDrawerContent title="云端用户详情" closable>
       <NSpin :show="loading">
         <template v-if="user">
           <NDescriptions :column="2" label-placement="left" bordered size="small" class="mb-16px">
