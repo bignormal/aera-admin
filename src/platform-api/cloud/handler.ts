@@ -24,6 +24,7 @@ type CloudUpstreamRequester = <T>(request: CloudUpstreamRequest) => Promise<{
 }>
 
 const validRequestID = /^[A-Za-z0-9._:-]{1,128}$/
+const validIdempotencyKey = /^[A-Za-z0-9._:-]{1,128}$/
 const validPathParam = /^[A-Za-z0-9-]{1,64}$/
 const reasonCodePattern = /^[a-z][a-z0-9_]{2,63}$/
 const cloudResourceType = 'aera-cloud'
@@ -101,6 +102,7 @@ type RollbackRequestDocument = {
 
 // 按操作类别构造上游请求：
 // - command：包装 admin.Command（operation_id/actor_admin_id/...），Idempotency-Key=operation_id
+// - desktop-command：严格透传空体，绑定当前管理员 actor 与调用方 Idempotency-Key
 // - official-mutation：包装 officialMutationEnvelope，JWT 带 operation_id
 // - official-rollback：校验本地双人审批记录后附加 approval_id/requester_admin_id
 async function prepareUpstream(
@@ -113,7 +115,24 @@ async function prepareUpstream(
 ): Promise<PreparedUpstream | PreparationFailure> {
   switch (operation.kind) {
     case 'read':
+    case 'desktop-read':
       return { body: operation.method === 'GET' ? undefined : clientBody }
+    case 'desktop-command': {
+      const body = asRecord(clientBody)
+      const idempotencyKey = req.headers?.get('idempotency-key')?.trim() || ''
+      if (!body || Object.keys(body).length !== 0 || !validIdempotencyKey.test(idempotencyKey)) {
+        return {
+          errorCode: 'INVALID_DESKTOP_HEALTH_CHECK',
+          message: '桌面健康检查需要空请求体与合法的 Idempotency-Key。',
+          status: 400,
+        }
+      }
+      return {
+        actor: { adminId: identity.adminUUID, role: identity.cloudRole },
+        body: {},
+        idempotencyKey,
+      }
+    }
     case 'official-read':
     case 'official-validate':
       return { actor: { adminId: identity.adminUUID, role: identity.cloudRole } }
@@ -373,6 +392,7 @@ export function createCloudHandler(
       return failure(currentRequestID, 404, 'OPERATION_NOT_FOUND', '未找到该云端管理操作。')
     }
     const operation = cloudOperations[operationKey]
+    const durableMutation = operation.mutation && operation.kind !== 'desktop-command'
     if (!hasCapability(req.user.role, operation.capability)) {
       return failure(currentRequestID, 403, 'FORBIDDEN', '当前角色无权执行该操作。')
     }
@@ -435,7 +455,7 @@ export function createCloudHandler(
       return failure(currentRequestID, prepared.status, prepared.errorCode, prepared.message)
     }
 
-    if (operation.mutation && prepared.idempotencyKey) {
+    if (durableMutation && prepared.idempotencyKey) {
       try {
         await persistPendingCloudOperationReceipt(req, {
           actorAdminId: identity.adminUUID,
@@ -480,11 +500,12 @@ export function createCloudHandler(
           method: operation.method,
           path: operation.upstreamPath(params),
           query: url.searchParams,
+          requiredScope: operation.upstreamScope,
           requestId: currentRequestID,
           signal: req.signal,
         })
       } catch (error) {
-        if (!operation.mutation || !prepared.idempotencyKey || !isAmbiguousMutationError(error)) {
+        if (!durableMutation || !prepared.idempotencyKey || !isAmbiguousMutationError(error)) {
           throw error
         }
         try {
@@ -524,7 +545,7 @@ export function createCloudHandler(
           return Response.json(pending, { status: 202 })
         }
       }
-      if (operation.mutation && prepared.idempotencyKey) {
+      if (durableMutation && prepared.idempotencyKey) {
         const operationResult = asRecord(result.data)
         const operationId = operationResult?.operation_id
         const cloudStatus = operationResult?.status
@@ -606,7 +627,7 @@ export function createCloudHandler(
         error instanceof PlatformAPIError
           ? error
           : new PlatformAPIError('UPSTREAM_UNEXPECTED_ERROR', 502, currentRequestID)
-      if (operation.mutation) {
+      if (durableMutation) {
         const auditCompleted = await auditCloudMutation(req, {
           after: prepared.body,
           capability: operation.capability,

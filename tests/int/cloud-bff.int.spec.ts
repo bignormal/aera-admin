@@ -151,6 +151,36 @@ describe('cloud operation registry', () => {
     )
   })
 
+  it('registers the Cloud-backed Desktop Fleet operations with bounded scopes', () => {
+    expect(registry.listDesktopControlInstances).toMatchObject({
+      capability: 'runtime:read',
+      method: 'GET',
+      kind: 'desktop-read',
+      mutation: false,
+      upstreamScope: 'desktop_control:read',
+    })
+    expect(registry.listDesktopControlInstances.upstreamPath({})).toBe('/desktop-control/instances')
+    expect(registry.listUserDesktopControlInstances.upstreamPath({ user_id: 'u1' })).toBe(
+      '/users/u1/desktop-control/instances',
+    )
+    expect(registry.getDesktopControlInstance.upstreamPath({ device_id: 'd1' })).toBe(
+      '/desktop-control/instances/d1',
+    )
+    expect(registry.getDesktopControlCommand.upstreamPath({ command_id: 'c1' })).toBe(
+      '/desktop-control/commands/c1',
+    )
+    expect(registry.createDesktopHealthCheck).toMatchObject({
+      capability: 'runtime:command:create',
+      method: 'POST',
+      kind: 'desktop-command',
+      mutation: true,
+      upstreamScope: 'desktop_control:command',
+    })
+    expect(registry.createDesktopHealthCheck.upstreamPath({ device_id: 'd1' })).toBe(
+      '/desktop-control/instances/d1/health-check',
+    )
+  })
+
   it('locks high-risk operations behind reauthentication and approvals', () => {
     expect(registry.resetCloudUserPassword).toMatchObject({
       capability: 'cloud:users:write',
@@ -191,6 +221,7 @@ type HandlerRequestOptions = {
   create?: ReturnType<typeof vi.fn>
   find?: ReturnType<typeof vi.fn>
   findByID?: ReturnType<typeof vi.fn>
+  idempotencyKey?: string
   method?: string
   operation: string
   query?: string
@@ -201,8 +232,10 @@ type HandlerRequestOptions = {
 const actorUUID = '7f3e9a10-6b2c-4d8e-9f01-abcdef012345'
 
 function handlerRequest(options: HandlerRequestOptions) {
+  const headers = new Headers({ 'x-request-id': 'cloud-request-1' })
+  if (options.idempotencyKey) headers.set('idempotency-key', options.idempotencyKey)
   return {
-    headers: new Headers({ 'x-request-id': 'cloud-request-1' }),
+    headers,
     json: vi.fn().mockResolvedValue(options.body),
     method: options.method || 'GET',
     payload: {
@@ -220,6 +253,41 @@ function handlerRequest(options: HandlerRequestOptions) {
 }
 
 describe('cloud BFF handler', () => {
+  it('forwards a Desktop health check as an empty body with the caller idempotency key', async () => {
+    const create = vi.fn()
+    const upstream = vi.fn().mockResolvedValue({
+      data: {
+        command_id: '3d7f5b80-4f6e-7081-bc23-456789abcdef',
+        device_id: actorUUID,
+        type: 'health_check',
+        state: 'queued',
+        expires_at: '2026-08-11T00:10:00.000Z',
+      },
+      upstreamRequestId: 'cloud-desktop-1',
+    })
+    const handler = createCloudHandler(upstream)
+    const response = await handler(
+      handlerRequest({
+        body: {},
+        create,
+        idempotencyKey: 'desktop-health-check-1',
+        method: 'POST',
+        operation: 'createDesktopHealthCheck',
+        query: `?device_id=${actorUUID}`,
+        role: 'operations_admin',
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    const call = upstream.mock.calls[0][0]
+    expect(call.path).toBe(`/desktop-control/instances/${actorUUID}/health-check`)
+    expect(call.body).toEqual({})
+    expect(call.idempotencyKey).toBe('desktop-health-check-1')
+    expect(call.actor).toEqual({ adminId: actorUUID, role: 'operator' })
+    expect(call.requiredScope).toBe('desktop_control:command')
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('rejects anonymous, unauthorized, unknown and mismatched requests before upstream', async () => {
     const upstream = vi.fn()
     const handler = createCloudHandler(upstream)

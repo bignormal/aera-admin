@@ -4,12 +4,16 @@ import type { Capability } from '../../access/capabilities'
 // kind 决定 BFF 如何构造请求：
 // - read：直接转发（POST lookup 透传请求体），JWT 不携带 actor 声明
 // - command：包装 admin.Command 信封（operation_id/actor_admin_id/...），Idempotency-Key=operation_id
+// - desktop-read：直接读取 Cloud Desktop control plane
+// - desktop-command：透传严格空健康检查体、管理员 actor 与调用方幂等键
 // - official-read：JWT 携带 actor 声明（admin_id + admin_role，无 operation_id）
 // - official-validate：同 official-read，但 POST 且禁止请求体
 // - official-mutation：包装 officialMutationEnvelope，JWT 携带 operation_id
 // - official-rollback：mutation 基础上追加 approval_id/requester_admin_id（双人复核）
 export type CloudOperationKind =
   | 'command'
+  | 'desktop-command'
+  | 'desktop-read'
   | 'official-mutation'
   | 'official-read'
   | 'official-rollback'
@@ -33,6 +37,7 @@ export type CloudOperation = {
   requiresApproval?: boolean
   requiresReauthentication?: boolean
   risk: 'high' | 'important' | 'normal'
+  upstreamScope?: string
   upstreamPath: (params: Record<string, string>) => string
 }
 
@@ -44,11 +49,18 @@ function cloudOperation(
   params: readonly string[] = [],
   options: Pick<
     CloudOperation,
-    'requiredActorRole' | 'requiresApproval' | 'requiresReauthentication' | 'risk'
+    | 'requiredActorRole'
+    | 'requiresApproval'
+    | 'requiresReauthentication'
+    | 'risk'
+    | 'upstreamScope'
   > = { risk: 'normal' },
 ): CloudOperation {
   const mutation =
-    kind === 'command' || kind === 'official-mutation' || kind === 'official-rollback'
+    kind === 'command' ||
+    kind === 'desktop-command' ||
+    kind === 'official-mutation' ||
+    kind === 'official-rollback'
   return {
     capability,
     requiredActorRole: options.requiredActorRole,
@@ -59,6 +71,7 @@ function cloudOperation(
     requiresApproval: options.requiresApproval,
     requiresReauthentication: options.requiresReauthentication,
     risk: options.risk,
+    upstreamScope: options.upstreamScope,
     upstreamPath: typeof path === 'string' ? () => path : path,
   }
 }
@@ -75,6 +88,8 @@ const draftID = ['draft_id'] as const
 const submissionID = ['submission_id'] as const
 const versionID = ['version_id'] as const
 const releaseID = ['release_id'] as const
+const deviceID = ['device_id'] as const
+const commandID = ['command_id'] as const
 
 export const cloudOperations = {
   // ---- 平台统计与云用户读 ----
@@ -116,6 +131,48 @@ export const cloudOperations = {
     cloudUsersRead,
     ({ operation_id }) => `/operations/${operation_id}`,
     ['operation_id'],
+  ),
+
+  // ---- Cloud Desktop 在线状态与固定健康检查 ----
+  listDesktopControlInstances: cloudOperation(
+    'desktop-read',
+    'GET',
+    'runtime:read',
+    '/desktop-control/instances',
+    [],
+    { risk: 'normal', upstreamScope: 'desktop_control:read' },
+  ),
+  listUserDesktopControlInstances: cloudOperation(
+    'desktop-read',
+    'GET',
+    'runtime:read',
+    ({ user_id }) => `/users/${user_id}/desktop-control/instances`,
+    userID,
+    { risk: 'normal', upstreamScope: 'desktop_control:read' },
+  ),
+  getDesktopControlInstance: cloudOperation(
+    'desktop-read',
+    'GET',
+    'runtime:read',
+    ({ device_id }) => `/desktop-control/instances/${device_id}`,
+    deviceID,
+    { risk: 'normal', upstreamScope: 'desktop_control:read' },
+  ),
+  createDesktopHealthCheck: cloudOperation(
+    'desktop-command',
+    'POST',
+    'runtime:command:create',
+    ({ device_id }) => `/desktop-control/instances/${device_id}/health-check`,
+    deviceID,
+    { risk: 'normal', upstreamScope: 'desktop_control:command' },
+  ),
+  getDesktopControlCommand: cloudOperation(
+    'desktop-read',
+    'GET',
+    'runtime:read',
+    ({ command_id }) => `/desktop-control/commands/${command_id}`,
+    commandID,
+    { risk: 'normal', upstreamScope: 'desktop_control:read' },
   ),
 
   // ---- 云用户/设备/会话命令 ----
