@@ -1,31 +1,31 @@
 import type { PayloadPage, ResourceID, ResourceQuery } from './resources';
 import { apiRequest } from './http';
 import { createResource, deleteResource, listResources, updateResource } from './resources';
+import { listDesktopInstances, type DesktopInstance, type DesktopQuery } from './cloud-desktop-control';
 
 export type RuntimeCommandType = 'health_check' | 'gateway_restart' | 'runtime_rollback' | 'runtime_upgrade';
 export type RuntimeInstance = {
   arch?: string;
   capabilities?: unknown;
   channels?: unknown;
+  deviceId?: string;
+  effectiveStatus?: string;
   healthSummary?: unknown;
   id: ResourceID;
   instanceType?: string;
   lastHeartbeatAt?: string | null;
   name?: string;
   os?: string;
+  organizationId?: string;
   resources?: unknown;
   status?: string;
   tenantId?: string;
+  userId?: string;
   version?: string;
+  workspaceId?: string;
   [key: string]: unknown;
 };
 export type RuntimeRelease = { id: ResourceID; [key: string]: unknown };
-
-type EnrollmentResponse = {
-  data: { enrollmentCode: string; expiresAt: string; instanceId: string };
-  meta: Record<string, unknown>;
-  requestId: string;
-};
 
 const requiredCapability: Record<RuntimeCommandType, string> = {
   gateway_restart: 'gateway.restart',
@@ -64,31 +64,6 @@ export function supportsRuntimeCommand(
   return capabilities(instance).includes(requiredCapability[command]);
 }
 
-export function consumeEnrollmentCode(value: EnrollmentResponse['data']) {
-  let code: string | null = value.enrollmentCode;
-  return {
-    expiresAt: value.expiresAt,
-    instanceId: value.instanceId,
-    take() {
-      const current = code;
-      code = null;
-      return current;
-    }
-  };
-}
-
-export async function createRuntimeEnrollment(input: {
-  instanceType: 'desktop' | 'runtime' | 'studio';
-  name: string;
-  tenantId?: string;
-}) {
-  const result = await apiRequest<EnrollmentResponse>('/platform/v1/runtime/enrollments', {
-    body: input,
-    method: 'POST'
-  });
-  return consumeEnrollmentCode(result.data);
-}
-
 export async function createRuntimeCommand(instance: RuntimeInstance, type: RuntimeCommandType) {
   if (!supportsRuntimeCommand(instance, type)) throw new Error('该实例不支持此命令');
   if (type !== 'health_check') throw new Error('该高风险命令需要重新验证，当前不可执行');
@@ -98,8 +73,62 @@ export async function createRuntimeCommand(instance: RuntimeInstance, type: Runt
   });
 }
 
-export function listRuntimeInstances(query: ResourceQuery, signal?: AbortSignal): Promise<PayloadPage<RuntimeInstance>> {
-  return listResources<RuntimeInstance>('runtime-instances', query, signal);
+function mapDesktopInstance(instance: DesktopInstance): RuntimeInstance {
+  return {
+    arch: instance.arch,
+    capabilities: [...instance.capabilities],
+    deviceId: instance.device_id,
+    effectiveStatus: instance.effective_status,
+    healthSummary: instance.health_summary,
+    id: instance.device_id,
+    instanceType: 'desktop',
+    lastHeartbeatAt: instance.last_heartbeat_at,
+    name: instance.display_name,
+    organizationId: instance.organization_id,
+    os: instance.platform,
+    status: instance.effective_status,
+    userId: instance.user_id,
+    version: instance.client_version,
+    workspaceId: instance.workspace_id
+  };
+}
+
+export type RuntimeInstanceQuery = ResourceQuery & {
+  clientVersion?: string;
+  deviceId?: string;
+  effectiveStatus?: DesktopQuery['effectiveStatus'];
+  organizationId?: string;
+  platform?: DesktopQuery['platform'];
+  userId?: string;
+};
+
+export async function listRuntimeInstances(
+  query: RuntimeInstanceQuery,
+  signal?: AbortSignal
+): Promise<PayloadPage<RuntimeInstance>> {
+  const result = await listDesktopInstances(
+    {
+      clientVersion: query.clientVersion,
+      deviceId: query.deviceId,
+      effectiveStatus: query.effectiveStatus,
+      limit: query.limit,
+      offset: Math.max(0, query.page - 1) * query.limit,
+      organizationId: query.organizationId,
+      platform: query.platform,
+      userId: query.userId
+    },
+    signal
+  );
+  const totalPages = Math.max(1, Math.ceil(result.total / query.limit));
+  return {
+    docs: result.items.map(mapDesktopInstance),
+    hasNextPage: query.page < totalPages,
+    hasPrevPage: query.page > 1,
+    limit: query.limit,
+    page: query.page,
+    totalDocs: result.total,
+    totalPages
+  };
 }
 
 export function listRuntimeReleases(query: ResourceQuery, signal?: AbortSignal): Promise<PayloadPage<RuntimeRelease>> {

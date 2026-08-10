@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRequest } from './http';
+import { listDesktopInstances } from './cloud-desktop-control';
 import {
-  consumeEnrollmentCode,
   createRuntimeCommand,
   deriveRuntimeStatus,
+  listRuntimeInstances,
   runtimeResourceRows,
   supportsRuntimeCommand
 } from './runtime';
 
 vi.mock('./http', () => ({ apiRequest: vi.fn() }));
+vi.mock('./cloud-desktop-control', () => ({ listDesktopInstances: vi.fn() }));
 
 describe('runtime administration service', () => {
   beforeEach(() => vi.mocked(apiRequest).mockReset());
@@ -28,10 +30,56 @@ describe('runtime administration service', () => {
     expect(apiRequest).not.toHaveBeenCalled();
   });
 
-  it('discards a one-time enrollment code after it is consumed', () => {
-    const code = consumeEnrollmentCode({ enrollmentCode: 'one-time', expiresAt: 'soon', instanceId: '7' });
-    expect(code.take()).toBe('one-time');
-    expect(code.take()).toBeNull();
+  it('reads global Runtime instances from the Cloud Desktop control plane', async () => {
+    vi.mocked(listDesktopInstances).mockResolvedValueOnce({
+      items: [
+        {
+          arch: 'arm64',
+          capabilities: ['diagnostics.health.read'],
+          client_version: '0.8.0',
+          created_at: '2026-08-11T00:00:00Z',
+          device_id: '10000000-0000-4000-8000-000000000001',
+          display_name: 'Aera MacBook',
+          effective_status: 'online',
+          health_status: 'unknown',
+          last_heartbeat_at: '2026-08-11T00:00:00Z',
+          platform: 'darwin',
+          updated_at: '2026-08-11T00:00:00Z',
+          user_id: '20000000-0000-4000-8000-000000000002'
+        }
+      ],
+      server_time: '2026-08-11T00:00:00Z',
+      total: 1
+    });
+
+    const signal = new AbortController().signal;
+    const result = await listRuntimeInstances(
+      { limit: 10, page: 1, search: '', sort: '-lastHeartbeatAt' },
+      signal
+    );
+
+    expect(listDesktopInstances).toHaveBeenCalledWith(
+      { limit: 10, offset: 0 },
+      signal
+    );
+    expect(result).toMatchObject({
+      docs: [
+        expect.objectContaining({
+          id: '10000000-0000-4000-8000-000000000001',
+          instanceType: 'desktop',
+          name: 'Aera MacBook',
+          status: 'online',
+          userId: '20000000-0000-4000-8000-000000000002'
+        })
+      ],
+      totalDocs: 1
+    });
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not expose the removed enrollment entry point', async () => {
+    const runtime = await import('./runtime');
+    expect((runtime as Record<string, unknown>).createRuntimeEnrollment).toBeUndefined();
   });
 
   it('keeps runtime resource rows bounded and content-free', () => {
