@@ -17,7 +17,7 @@ Docker 私有网络。网关同时连接一个独立的非 internal bridge，以
 
 `adminSchema=1` 表示当前独立 Admin 代码系的第一个候选数据库兼容代际，不把
 Payload 自动生成的 SQLite 表数量伪装为人工 migration 编号。候选绑定 Cloud
-Internal Admin API `v1`、Cloud schema `17..21` 和一个精确 Cloud source SHA。
+Internal Admin API `v1`、Cloud schema `17..23` 和一个精确 Cloud source SHA。
 
 ## 生成签名候选
 
