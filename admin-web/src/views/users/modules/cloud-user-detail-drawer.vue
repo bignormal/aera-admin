@@ -2,6 +2,7 @@
 import { computed, h, reactive, ref, watch } from 'vue';
 import type { DataTableColumns } from 'naive-ui';
 import { NButton, NTag } from 'naive-ui';
+import CloudUserDesktopPanel from './cloud-user-desktop-panel.vue';
 import { useCapability } from '@/composables/use-capability';
 import { useStepUp } from '@/composables/use-step-up';
 import { CloudServiceError } from '@/service/cloud';
@@ -246,7 +247,7 @@ const sessionColumns: DataTableColumns<CloudSession> = [
 
 <template>
   <NDrawer v-model:show="show" :width="860" placement="right">
-    <NDrawerContent :title="`云端用户详情`" closable>
+    <NDrawerContent title="云端用户详情" closable>
       <NSpin :show="loading">
         <template v-if="user">
           <NDescriptions :column="2" label-placement="left" bordered size="small" class="mb-16px">
@@ -310,6 +311,9 @@ const sessionColumns: DataTableColumns<CloudSession> = [
           </NAlert>
 
           <NTabs type="line" animated>
+            <NTabPane name="desktop" tab="Desktop 终端">
+              <CloudUserDesktopPanel :user-id="user.user_id" />
+            </NTabPane>
             <NTabPane name="devices" :tab="`设备（${devices.length}）`">
               <NDataTable
                 :columns="deviceColumns"

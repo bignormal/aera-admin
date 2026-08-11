@@ -11,8 +11,8 @@ const noopDelete: ResourceDelete = async () => undefined;
 
 <template>
   <ResourceCrudPage
-    title="指令记录"
-    description="查看平台下发指令的状态和最小化执行摘要"
+    title="Legacy Runtime / Studio 指令记录"
+    description="仅兼容旧 Payload Runtime/Studio 记录；Cloud Desktop V1 健康检查结果请在实例详情或用户 Desktop 终端中查看。"
     hide-create hide-edit hide-delete
     :columns="[
       { key: 'instance', label: '实例' },

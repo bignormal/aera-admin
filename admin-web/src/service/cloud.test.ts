@@ -22,6 +22,23 @@ describe('cloud service', () => {
     });
   });
 
+  it('forwards the Desktop command idempotency key to the BFF', async () => {
+    vi.mocked(apiRequest).mockResolvedValueOnce({ data: {}, meta: {}, requestId: 'r2' });
+
+    await callCloud('createDesktopHealthCheck', {
+      body: {},
+      idempotencyKey: 'desktop-health-check-1',
+      method: 'POST'
+    });
+
+    expect(apiRequest).toHaveBeenCalledWith('/cloud/v1/createDesktopHealthCheck', {
+      body: {},
+      headers: { 'Idempotency-Key': 'desktop-health-check-1' },
+      method: 'POST',
+      signal: undefined
+    });
+  });
+
   it('maps 428 responses to the step-up-required error kind', async () => {
     vi.mocked(apiRequest).mockRejectedValueOnce(
       new ApiError(428, '需要二次验证', undefined, {

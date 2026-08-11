@@ -24,6 +24,7 @@ export type CloudUpstreamRequest = {
   method: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT'
   path: string
   query?: URLSearchParams
+  requiredScope?: string
   requestId: string
   signal?: AbortSignal
 }

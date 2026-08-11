@@ -6,6 +6,7 @@ export type CloudMethod = 'GET' | 'PATCH' | 'POST';
 
 export type CloudCallOptions = {
   body?: unknown;
+  idempotencyKey?: string;
   method?: CloudMethod;
   params?: Record<string, boolean | number | string | null | undefined>;
   signal?: AbortSignal;
@@ -76,6 +77,9 @@ export async function callCloud<T>(operation: string, options: CloudCallOptions 
     return await apiRequest<CloudEnvelope<T>>(`/cloud/v1/${encodeURIComponent(operation)}${suffix}`, {
       method: options.method || 'GET',
       body: options.body as object | undefined,
+      ...(options.idempotencyKey
+        ? { headers: { 'Idempotency-Key': options.idempotencyKey } }
+        : {}),
       signal: options.signal
     });
   } catch (error) {
