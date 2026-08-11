@@ -29,6 +29,7 @@ for file in \
   scripts/release/build-manifest.sh \
   scripts/release/build-provenance.sh \
   scripts/release/verify-manifest.sh \
+  docs/operations/internal-beta-delivery.md \
   .github/workflows/candidate.yml; do
   require_file "$file"
 done
@@ -56,7 +57,8 @@ require_text .github/workflows/candidate.yml 'docker buildx build'
 require_text .github/workflows/candidate.yml 'cosign sign --yes'
 require_text .github/workflows/candidate.yml 'cosign attest --yes'
 require_text .github/workflows/candidate.yml 'cosign sign-blob --yes'
-require_text .github/workflows/candidate.yml 'AERA_RELEASE_CLOUD_SCHEMA_MAX: "21"'
+require_text .github/workflows/candidate.yml 'AERA_RELEASE_CLOUD_SCHEMA_MAX: "23"'
+require_text docs/operations/internal-beta-delivery.md 'Cloud schema `17\.\.23`'
 require_text scripts/release/verify-manifest.sh 'cosign verify-attestation'
 require_text scripts/release/verify-manifest.sh 'cosign verify-blob'
 
