@@ -12,8 +12,11 @@ standalone 服务、Soybean `/admin/` 静态资源和私有同源网关；部署
 Docker 私有网络。网关同时连接一个独立的非 internal bridge，以便 Docker
 在宿主机建立回环端口映射；该网络不连接 Payload，且不改变
 `127.0.0.1` 的唯一发布地址。候选默认 `mutationsEnabledByDefault=false`，网关允许读取和
-本地登录/TOTP 生命周期，但对其余非只读 `/api/*` 请求返回
-`MUTATIONS_DISABLED`。在单独评审启用写操作前不得改变这个默认值。
+本地登录/TOTP 生命周期；其余非只读 `/api/*` 请求默认返回 `MUTATIONS_DISABLED`。
+第一版可在部署时显式设置 `AERA_ADMIN_HEALTH_CHECKS_ENABLED=true`，仅放行
+`POST /api/platform/v1/runtime/commands` 这一条健康检查入口；Payload 仍会校验后台登录、
+角色能力和 `health_check` 类型，重启、升级、回滚及其他写接口继续被网关拦截。未显式设置时
+健康检查入口也保持关闭。
 
 `adminSchema=1` 表示当前独立 Admin 代码系的第一个候选数据库兼容代际，不把
 Payload 自动生成的 SQLite 表数量伪装为人工 migration 编号。候选绑定 Cloud
@@ -77,6 +80,17 @@ export AERA_INTERNAL_BETA_ADMIN_EXPECTED_CLOUD_SHA='<cloud-source-sha>'
 export AERA_INTERNAL_BETA_PUBLIC_ORIGIN='https://<internal-beta-ip>'
 deploy/internal-beta/deploy.sh deploy /protected/admin-candidate/manifest.json
 ```
+
+要启用第一版桌面健康检查，在部署同一已验证候选时额外设置：
+
+```bash
+export AERA_ADMIN_HEALTH_CHECKS_ENABLED=true
+deploy/internal-beta/deploy.sh deploy /protected/admin-candidate/manifest.json
+```
+
+部署 smoke 会确认普通写接口仍返回 `MUTATIONS_DISABLED`，而健康检查入口已到达
+Payload 的登录鉴权层；没有管理员会话时应返回 401/403。回滚或未设置该变量时，健康检查
+入口自动恢复为关闭状态。
 
 部署脚本先重新验证候选，按 digest 拉取同一镜像，启动 Payload 和回环网关，再
 检查 Soybean、同源 API、默认写禁用，并从 Payload 容器使用真实 mTLS 客户端

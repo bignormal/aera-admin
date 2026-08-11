@@ -65,6 +65,7 @@ before(async () => {
       AERA_ADMIN_GATEWAY_HOST: '127.0.0.1',
       AERA_ADMIN_GATEWAY_PORT: String(gatewayPort),
       AERA_ADMIN_MUTATIONS_ENABLED: 'false',
+      AERA_ADMIN_HEALTH_CHECKS_ENABLED: 'true',
       AERA_ADMIN_PAYLOAD_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       AERA_ADMIN_STATIC_ROOT: staticRoot,
     },
@@ -112,10 +113,32 @@ test('proxies reads and local auth but blocks business mutations by default', as
   assert.equal(login.status, 200)
 })
 
+test('allows only the authenticated health-check command mutation when enabled', async () => {
+  const origin = `http://127.0.0.1:${gatewayPort}`
+  const healthCheck = await fetch(`${origin}/api/platform/v1/runtime/commands`, {
+    body: JSON.stringify({ instanceId: 'desktop-1', type: 'health_check' }),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  })
+  assert.equal(healthCheck.status, 200)
+  assert.deepEqual(await healthCheck.json(), {
+    body: JSON.stringify({ instanceId: 'desktop-1', type: 'health_check' }),
+    method: 'POST',
+    url: '/api/platform/v1/runtime/commands',
+  })
+  const unrelatedCommand = await fetch(`${origin}/api/platform/v1/runtime/commands/other`, {
+    body: '{}',
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  })
+  assert.equal(unrelatedCommand.status, 503)
+})
+
 test('reports Payload-aware readiness and hides all unrelated routes', async () => {
   const origin = `http://127.0.0.1:${gatewayPort}`
   const ready = await fetch(`${origin}/health/ready`)
   assert.deepEqual(await ready.json(), {
+    healthChecksEnabled: true,
     mutationsEnabled: false,
     service: 'aera-admin',
     status: 'ok',

@@ -10,6 +10,7 @@ const listenPort = Number(process.env.AERA_ADMIN_GATEWAY_PORT || '8080')
 const staticRoot = path.resolve(process.env.AERA_ADMIN_STATIC_ROOT || '/app/admin-web-dist')
 const upstream = new URL(process.env.AERA_ADMIN_PAYLOAD_UPSTREAM || 'http://payload:3000')
 const mutationsEnabled = process.env.AERA_ADMIN_MUTATIONS_ENABLED === 'true'
+const healthChecksEnabled = process.env.AERA_ADMIN_HEALTH_CHECKS_ENABLED === 'true'
 const maximumBodyBytes = 25 * 1024 * 1024
 
 if (
@@ -81,6 +82,10 @@ function isLocalSecurityLifecycle(pathname) {
   )
 }
 
+function isHealthCheckMutation(method, pathname) {
+  return healthChecksEnabled && method === 'POST' && pathname === '/api/platform/v1/runtime/commands'
+}
+
 async function upstreamReady() {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 3000)
@@ -106,6 +111,7 @@ function proxy(request, response, requestURL) {
   if (
     !mutationsEnabled &&
     !isSafeMethod(request.method || '') &&
+    !isHealthCheckMutation(request.method || '', requestURL.pathname) &&
     !isLocalSecurityLifecycle(requestURL.pathname)
   ) {
     json(response, 503, {
@@ -235,6 +241,7 @@ const server = http.createServer(async (request, response) => {
   if (requestURL.pathname === '/health/ready') {
     const ready = await upstreamReady()
     json(response, ready ? 200 : 503, {
+      healthChecksEnabled,
       mutationsEnabled,
       service: 'aera-admin',
       status: ready ? 'ok' : 'unavailable',

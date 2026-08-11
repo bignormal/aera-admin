@@ -12,6 +12,12 @@ port=${AERA_ADMIN_PRIVATE_PORT:-19090}
 command -v curl >/dev/null 2>&1 || fail 'curl is required'
 command -v jq >/dev/null 2>&1 || fail 'jq is required'
 
+health_checks_enabled=${AERA_ADMIN_HEALTH_CHECKS_ENABLED:-false}
+case "$health_checks_enabled" in
+  true | false) ;;
+  *) fail 'AERA_ADMIN_HEALTH_CHECKS_ENABLED must be true or false' ;;
+esac
+
 origin="http://127.0.0.1:$port"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/aera-admin-health.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -32,10 +38,11 @@ curl "${curl_args[@]}" --fail "$origin/health/ready" >"$tmp/ready.json"
 jq -e '.service == "aera-admin-gateway" and .status == "ok"' \
   "$tmp/live.json" >/dev/null ||
   fail 'gateway liveness response is invalid'
-jq -e '
+jq -e --arg enabled "$health_checks_enabled" '
   .service == "aera-admin" and
   .status == "ok" and
-  .mutationsEnabled == false
+  .mutationsEnabled == false and
+  .healthChecksEnabled == ($enabled == "true")
 ' "$tmp/ready.json" >/dev/null ||
   fail 'Admin readiness or default mutation policy is invalid'
 
@@ -61,5 +68,22 @@ mutation_status=$(curl "${curl_args[@]}" \
   fail 'business mutation was not disabled by default'
 jq -e '.error.code == "MUTATIONS_DISABLED"' "$tmp/mutation.json" >/dev/null ||
   fail 'disabled mutation response is invalid'
+
+health_status=$(curl "${curl_args[@]}" \
+  --output "$tmp/health-command.json" \
+  --write-out '%{http_code}' \
+  --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{}' \
+  "$origin/api/platform/v1/runtime/commands")
+if [[ $health_checks_enabled == true ]]; then
+  [[ $health_status == 401 || $health_status == 403 ]] ||
+    fail 'health-check mutation allowlist did not reach Payload auth'
+else
+  [[ $health_status == 503 ]] ||
+    fail 'health-check mutation was not disabled by default'
+  jq -e '.error.code == "MUTATIONS_DISABLED"' "$tmp/health-command.json" >/dev/null ||
+    fail 'disabled health-check response is invalid'
+fi
 
 printf 'internal beta Admin health smoke passed (private, mutations disabled)\n'
