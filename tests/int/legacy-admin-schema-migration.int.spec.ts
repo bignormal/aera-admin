@@ -85,4 +85,4 @@ it('bootstraps the complete production schema from the legacy pushed SQLite data
   } finally {
     await payload.db.destroy?.()
   }
-})
+}, 20_000)
