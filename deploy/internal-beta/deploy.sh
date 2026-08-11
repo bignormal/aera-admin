@@ -38,6 +38,12 @@ verify_command=${AERA_INTERNAL_BETA_ADMIN_VERIFY_COMMAND:-"$repo_root/scripts/re
 health_command=${AERA_INTERNAL_BETA_ADMIN_HEALTH_COMMAND:-"$repo_root/deploy/internal-beta/health-smoke.sh"}
 cloud_health_command=${AERA_INTERNAL_BETA_ADMIN_CLOUD_HEALTH_COMMAND:-"$repo_root/deploy/internal-beta/cloud-smoke.sh"}
 exposure_command=${AERA_INTERNAL_BETA_ADMIN_EXPOSURE_COMMAND:-"$repo_root/deploy/internal-beta/exposure-check.sh"}
+health_checks_enabled=${AERA_ADMIN_HEALTH_CHECKS_ENABLED:-false}
+
+case "$health_checks_enabled" in
+  true | false) ;;
+  *) fail 'AERA_ADMIN_HEALTH_CHECKS_ENABLED must be true or false' ;;
+esac
 
 require_value AERA_ADMIN_ENV_FILE
 require_value AERA_ADMIN_PKI_DIR
@@ -135,6 +141,7 @@ compose_image() {
   AGENTERA_ADMIN_IMAGE_DIGEST="$image" \
     AERA_ADMIN_ENV_FILE="$AERA_ADMIN_ENV_FILE" \
     AERA_ADMIN_PKI_DIR="$AERA_ADMIN_PKI_DIR" \
+    AERA_ADMIN_HEALTH_CHECKS_ENABLED="$health_checks_enabled" \
     AERA_ADMIN_MUTATIONS_ENABLED=false \
     AERA_ADMIN_PRIVATE_PORT="${AERA_ADMIN_PRIVATE_PORT:-19090}" \
     docker compose \
@@ -149,7 +156,8 @@ start_image() {
 }
 
 check_image() {
-  AERA_ADMIN_PRIVATE_PORT="${AERA_ADMIN_PRIVATE_PORT:-19090}" \
+  AERA_ADMIN_HEALTH_CHECKS_ENABLED="$health_checks_enabled" \
+    AERA_ADMIN_PRIVATE_PORT="${AERA_ADMIN_PRIVATE_PORT:-19090}" \
     "$health_command" &&
     AERA_ADMIN_PAYLOAD_CONTAINER="${compose_project}-payload-1" \
       "$cloud_health_command" &&
