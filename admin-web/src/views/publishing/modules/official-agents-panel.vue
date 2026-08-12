@@ -55,9 +55,12 @@ const authStore = useAuthStore();
 const canRead = computed(() => can('official-agents:read'));
 const canDraft = computed(() => can('official-agents:draft:write'));
 const canReview = computed(() => can('official-agents:review:write'));
+const canRelease = computed(() => can('official-agents:release:write'));
 const canRollback = computed(() => can('official-agents:rollback:write'));
-const releaseActions = (row: OfficialRelease) =>
-  releaseActionsFor({ role: authStore.userInfo.role, status: row.state });
+const releaseActions = (row: OfficialRelease) => {
+  if (!canRelease.value) return [];
+  return releaseActionsFor({ role: authStore.userInfo.role, status: row.state });
+};
 const { onStepUpCancelled, onStepUpVerified, runProtected, showStepUp } = useStepUp();
 
 const loading = ref(false);

@@ -169,7 +169,11 @@ describe('content delivery endpoints', () => {
     expect(body.data).toMatchObject({
       cloudDefinitionId: definitionID,
       cloudDraftId: draftID,
+      cloudReleaseId: null,
+      cloudSubmissionId: null,
+      cloudVersionId: null,
       contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      desktopVerification: null,
       runtimeManifestSha256: digest('web-research'),
       stableKey: 'research-expert',
       syncStatus: 'draft_synced',
@@ -334,5 +338,289 @@ describe('content delivery endpoints', () => {
     const body = await response.json()
     expect(body.data).toMatchObject({ cloudDraftId: draftID, syncStatus: 'draft_synced' })
     expect(JSON.stringify(body)).not.toContain('must not be returned')
+  })
+
+  it('allows an official read-only auditor to inspect an Agent delivery link', async () => {
+    const endpoints = createContentDeliveryEndpoints(vi.fn())
+    const endpoint = endpoints.find((item) => item.path === '/content-delivery/:resourceType/:id')
+    const response = await endpoint!.handler({
+      headers: new Headers(),
+      method: 'GET',
+      payload: {
+        find: vi.fn().mockResolvedValue({
+          docs: [
+            {
+              id: 9,
+              payloadDocumentId: '7',
+              stableKey: 'research-expert',
+              syncStatus: 'draft_synced',
+            },
+          ],
+        }),
+      },
+      routeParams: { id: '7', resourceType: 'agent' },
+      user: { id: 4, role: 'auditor' },
+    } as never)
+
+    expect(response.status).toBe(200)
+  })
+
+  it('keeps a pending Cloud submission waiting for review without requesting a delivery target', async () => {
+    const submissionID = '33333333-3333-4333-8333-333333333333'
+    const link = {
+      cloudDefinitionId: definitionID,
+      cloudSubmissionId: submissionID,
+      contentDigest: 'a'.repeat(64),
+      id: 9,
+      payloadDocumentId: '7',
+      stableKey: 'research-expert',
+      syncStatus: 'submitted',
+    }
+    const cloud = vi.fn().mockResolvedValue({
+      data: {
+        content_digest: link.contentDigest,
+        definition_id: definitionID,
+        status: 'pending',
+        submission_id: submissionID,
+      },
+      requestId: 'content-delivery-pending-1',
+    })
+    const endpoints = createContentDeliveryEndpoints(cloud)
+    const endpoint = endpoints.find((item) => item.path === '/content-delivery/:resourceType/:id')
+
+    const response = await endpoint!.handler({
+      headers: new Headers(),
+      method: 'GET',
+      payload: { find: vi.fn().mockResolvedValue({ docs: [link] }) },
+      routeParams: { id: '7', resourceType: 'agent' },
+      user: { id: 3, role: 'publisher' },
+    } as never)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ data: { syncStatus: 'submitted' } })
+    expect(cloud).toHaveBeenCalledTimes(1)
+    expect(cloud).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ operation: 'getOfficialSubmission' }),
+    )
+  })
+
+  it('reads and persists only matching Cloud Desktop verification stages', async () => {
+    const releaseID = '33333333-3333-4333-8333-333333333333'
+    const versionID = '44444444-4444-4444-8444-444444444444'
+    const link = {
+      cloudReleaseId: releaseID,
+      cloudVersionId: versionID,
+      contentDigest: 'a'.repeat(64),
+      id: 9,
+      payloadDocumentId: '7',
+      stableKey: 'research-expert',
+      syncStatus: 'released',
+    }
+    const cloud = vi.fn().mockResolvedValue({
+      data: {
+        release_id: releaseID,
+        stages: [
+          {
+            content_digest: 'a'.repeat(64),
+            definition_id: definitionID,
+            desktop_version: 'v0.24.0',
+            device_count: 2,
+            occurred_at: '2026-08-12T04:08:00.000Z',
+            received_at: '2026-08-12T04:08:01.000Z',
+            release_revision_id: '55555555-5555-4555-8555-555555555555',
+            request_id: '66666666-6666-4666-8666-666666666666',
+            runtime_version: 'v0.18.2-agentera.1',
+            verification_status: 'activated',
+            version_id: versionID,
+          },
+        ],
+      },
+      requestId: 'content-delivery-read-1',
+    })
+    let persisted = link as Record<string, unknown>
+    const update = vi.fn(async ({ data }) => {
+      persisted = { ...persisted, ...data }
+      return persisted
+    })
+    const endpoints = createContentDeliveryEndpoints(cloud)
+    const endpoint = endpoints.find((item) => item.path === '/content-delivery/:resourceType/:id')
+
+    const response = await endpoint!.handler({
+      headers: new Headers(),
+      method: 'GET',
+      payload: { find: vi.fn().mockResolvedValue({ docs: [link] }), update },
+      routeParams: { id: '7', resourceType: 'agent' },
+      user: { id: 3, role: 'publisher' },
+    } as never)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        syncStatus: 'desktop_verified',
+        desktopVerification: {
+          desktopVerified: true,
+          stages: [expect.objectContaining({ verificationStatus: 'activated', deviceCount: 2 })],
+        },
+      },
+    })
+    expect(cloud).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        operation: 'getOfficialDeliveryVerificationSummary',
+        params: { release_id: releaseID },
+      }),
+    )
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ syncStatus: 'desktop_verified' }), id: 9 }),
+    )
+  })
+
+  it('reconciles an approved definition to its immutable release before reading Desktop verification', async () => {
+    const submissionID = '33333333-3333-4333-8333-333333333333'
+    const versionID = '44444444-4444-4444-8444-444444444444'
+    const releaseID = '55555555-5555-4555-8555-555555555555'
+    const contentDigest = 'a'.repeat(64)
+    const link = {
+      cloudDefinitionId: definitionID,
+      cloudSubmissionId: submissionID,
+      contentDigest,
+      id: 9,
+      payloadDocumentId: '7',
+      stableKey: 'research-expert',
+      syncStatus: 'submitted',
+    }
+    const cloud = vi.fn(async (_req, input) => {
+      if (input.operation === 'getOfficialSubmission') {
+        return {
+          data: {
+            content_digest: contentDigest,
+            definition_id: definitionID,
+            status: 'approved',
+            submission_id: submissionID,
+          },
+          requestId: 'content-delivery-reconcile-0',
+        }
+      }
+      if (input.operation === 'getOfficialDeliveryTarget') {
+        return {
+          data: {
+            content_digest: contentDigest,
+            definition_id: definitionID,
+            releases: [
+              {
+                current_revision_id: '66666666-6666-4666-8666-666666666666',
+                release_id: releaseID,
+                state: 'active',
+                channel: 'internal',
+                version_id: versionID,
+              },
+            ],
+            submission_id: submissionID,
+            version_id: versionID,
+          },
+          requestId: 'content-delivery-reconcile-1',
+        }
+      }
+      if (input.operation === 'getOfficialDeliveryVerificationSummary') {
+        return { data: { release_id: releaseID, stages: [] }, requestId: 'content-delivery-reconcile-4' }
+      }
+      throw new Error(`unexpected operation ${input.operation}`)
+    })
+    let persisted = link as Record<string, unknown>
+    const update = vi.fn(async ({ data }) => {
+      persisted = { ...persisted, ...data }
+      return persisted
+    })
+    const endpoints = createContentDeliveryEndpoints(cloud)
+    const endpoint = endpoints.find((item) => item.path === '/content-delivery/:resourceType/:id')
+
+    const response = await endpoint!.handler({
+      headers: new Headers(),
+      method: 'GET',
+      payload: { find: vi.fn().mockResolvedValue({ docs: [link] }), update },
+      routeParams: { id: '7', resourceType: 'agent' },
+      user: { id: 3, role: 'publisher' },
+    } as never)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        cloudReleaseId: releaseID,
+        cloudVersionId: versionID,
+        desktopVerification: { desktopVerified: false, stages: [] },
+        syncStatus: 'released',
+      },
+    })
+    expect(cloud.mock.calls.map(([, input]) => input.operation)).toEqual([
+      'getOfficialSubmission',
+      'getOfficialDeliveryTarget',
+      'getOfficialDeliveryVerificationSummary',
+    ])
+  })
+
+  it('keeps an approved version out of Desktop delivery until a Release is active', async () => {
+    const submissionID = '33333333-3333-4333-8333-333333333333'
+    const versionID = '44444444-4444-4444-8444-444444444444'
+    const link = {
+      cloudDefinitionId: definitionID,
+      cloudSubmissionId: submissionID,
+      contentDigest: 'a'.repeat(64),
+      id: 9,
+      payloadDocumentId: '7',
+      stableKey: 'research-expert',
+      syncStatus: 'submitted',
+    }
+    const cloud = vi.fn().mockResolvedValue({
+      data: {},
+      requestId: 'unused',
+    })
+    cloud.mockImplementation(async (_req, input) =>
+      input.operation === 'getOfficialSubmission'
+        ? {
+            data: {
+              content_digest: link.contentDigest,
+              definition_id: definitionID,
+              status: 'approved',
+              submission_id: submissionID,
+            },
+            requestId: 'content-delivery-approved-0',
+          }
+        : {
+            data: {
+              content_digest: link.contentDigest,
+              definition_id: definitionID,
+              releases: [
+                {
+                  channel: 'internal',
+                  current_revision_id: '55555555-5555-4555-8555-555555555555',
+                  release_id: '66666666-6666-4666-8666-666666666666',
+                  state: 'paused',
+                  version_id: versionID,
+                },
+              ],
+              submission_id: submissionID,
+              version_id: versionID,
+            },
+            requestId: 'content-delivery-approved-1',
+          },
+    )
+    const update = vi.fn(async ({ data }) => ({ ...link, ...data }))
+    const endpoints = createContentDeliveryEndpoints(cloud)
+    const endpoint = endpoints.find((item) => item.path === '/content-delivery/:resourceType/:id')
+
+    const response = await endpoint!.handler({
+      headers: new Headers(),
+      method: 'GET',
+      payload: { find: vi.fn().mockResolvedValue({ docs: [link] }), update },
+      routeParams: { id: '7', resourceType: 'agent' },
+      user: { id: 3, role: 'publisher' },
+    } as never)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      data: { cloudReleaseId: null, cloudVersionId: versionID, syncStatus: 'approved' },
+    })
+    expect(cloud).toHaveBeenCalledTimes(2)
   })
 })

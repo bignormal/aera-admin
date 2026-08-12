@@ -38,6 +38,177 @@ export function deliveryStatusFor(input: {
   return 'local_only'
 }
 
+const deliveryVerificationStatuses = [
+  'catalog_visible',
+  'signature_verified',
+  'compatible',
+  'installed',
+  'activated',
+  'failed',
+] as const
+
+const deliveryVerificationErrorCodes = [
+  'catalog_unavailable',
+  'invalid_response',
+  'signature_verification_failed',
+  'runtime_incompatible',
+  'content_digest_mismatch',
+  'installation_failed',
+  'activation_failed',
+  'cloud_unavailable',
+] as const
+
+type DeliveryVerificationStatus = (typeof deliveryVerificationStatuses)[number]
+type DeliveryVerificationErrorCode = (typeof deliveryVerificationErrorCodes)[number]
+
+export type DeliveryVerificationStage = {
+  verificationStatus: DeliveryVerificationStatus
+  errorCode?: DeliveryVerificationErrorCode
+  releaseRevisionId?: string
+  definitionId?: string
+  versionId: string
+  contentDigest: string
+  deviceCount: number
+  runtimeVersion?: string
+  desktopVersion?: string
+  occurredAt?: string
+  receivedAt?: string
+  requestId?: string
+}
+
+type DeliveryVerificationResult = {
+  desktopVerified: boolean
+  stages: DeliveryVerificationStage[]
+  syncStatus: 'desktop_verified' | 'released'
+}
+
+const canonicalUUIDPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+function optionalCanonicalUUID(value: unknown): string | undefined {
+  return typeof value === 'string' && canonicalUUIDPattern.test(value) ? value : undefined
+}
+
+function optionalCanonicalTimestamp(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) ||
+    !Number.isFinite(Date.parse(value))
+  ) {
+    return undefined
+  }
+  return value
+}
+
+function deliveryVerificationStage(
+  value: unknown,
+  link: {
+    cloudDefinitionId?: string | null
+    cloudVersionId: string
+    contentDigest: string
+  },
+): DeliveryVerificationStage | undefined {
+  const stage = record(value)
+  if (!stage) return undefined
+  const verificationStatus = stage.verification_status
+  const errorCode = stage.error_code
+  const versionId = optionalCanonicalUUID(stage.version_id)
+  const contentDigest = stage.content_digest
+  const deviceCount = stage.device_count
+  if (
+    typeof verificationStatus !== 'string' ||
+    !deliveryVerificationStatuses.includes(verificationStatus as DeliveryVerificationStatus) ||
+    versionId !== link.cloudVersionId ||
+    contentDigest !== link.contentDigest ||
+    typeof deviceCount !== 'number' ||
+    !Number.isSafeInteger(deviceCount) ||
+    deviceCount < 1
+  ) {
+    return undefined
+  }
+  if (
+    (verificationStatus === 'failed' &&
+      (typeof errorCode !== 'string' ||
+        !deliveryVerificationErrorCodes.includes(errorCode as DeliveryVerificationErrorCode))) ||
+    (verificationStatus !== 'failed' && errorCode !== undefined)
+  ) {
+    return undefined
+  }
+  const definitionId = optionalCanonicalUUID(stage.definition_id)
+  if (link.cloudDefinitionId && definitionId !== link.cloudDefinitionId) return undefined
+  const normalized: DeliveryVerificationStage = {
+    verificationStatus: verificationStatus as DeliveryVerificationStatus,
+    versionId,
+    contentDigest,
+    deviceCount,
+  }
+  const releaseRevisionId = optionalCanonicalUUID(stage.release_revision_id)
+  const occurredAt = optionalCanonicalTimestamp(stage.occurred_at)
+  const receivedAt = optionalCanonicalTimestamp(stage.received_at)
+  const requestId = optionalCanonicalUUID(stage.request_id)
+  if (
+    !definitionId ||
+    !releaseRevisionId ||
+    typeof stage.runtime_version !== 'string' ||
+    stage.runtime_version.length < 5 ||
+    typeof stage.desktop_version !== 'string' ||
+    stage.desktop_version.length < 5 ||
+    !occurredAt ||
+    !receivedAt ||
+    !requestId
+  ) {
+    return undefined
+  }
+  normalized.definitionId = definitionId
+  normalized.releaseRevisionId = releaseRevisionId
+  normalized.runtimeVersion = stage.runtime_version
+  normalized.desktopVersion = stage.desktop_version
+  normalized.occurredAt = occurredAt
+  normalized.receivedAt = receivedAt
+  normalized.requestId = requestId
+  if (typeof errorCode === 'string') normalized.errorCode = errorCode as DeliveryVerificationErrorCode
+  return normalized
+}
+
+export function deliveryVerificationForLink(
+  link: {
+    cloudDefinitionId?: string | null
+    cloudReleaseId: string | null
+    cloudVersionId: string | null
+    contentDigest: string | null
+  },
+  value: unknown,
+): DeliveryVerificationResult {
+  const summary = record(value)
+  if (
+    !summary ||
+    !link.cloudReleaseId ||
+    !link.cloudVersionId ||
+    !link.contentDigest ||
+    summary.release_id !== link.cloudReleaseId ||
+    !Array.isArray(summary.stages)
+  ) {
+    return { desktopVerified: false, stages: [], syncStatus: 'released' }
+  }
+  const stages = summary.stages.flatMap((stage) => {
+    const normalized = deliveryVerificationStage(stage, {
+      cloudDefinitionId: link.cloudDefinitionId,
+      cloudVersionId: link.cloudVersionId!,
+      contentDigest: link.contentDigest!,
+    })
+    return normalized ? [normalized] : []
+  })
+  if (stages.length !== summary.stages.length) {
+    return { desktopVerified: false, stages: [], syncStatus: 'released' }
+  }
+  const desktopVerified = stages.some((stage) => stage.verificationStatus === 'activated')
+  return {
+    desktopVerified,
+    stages,
+    syncStatus: desktopVerified ? 'desktop_verified' : 'released',
+  }
+}
+
 export type PluginDeliveryStatus =
   'registered' | 'contract_pending' | 'cloud_published' | 'desktop_verified'
 

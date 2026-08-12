@@ -5,6 +5,7 @@ import { hasCapability, type Capability } from '../access/capabilities'
 import {
   buildOfficialAgentCloudPackage,
   ContentDeliveryValidationError,
+  deliveryVerificationForLink,
   type DeliveryStatus,
 } from '../domain/content-delivery'
 import { appendAuditLog } from '../domain/audit'
@@ -32,6 +33,9 @@ type DeliveryLink = Record<string, unknown> & {
   cloudDefinitionId?: string | null
   cloudDraftId?: string | null
   cloudSubmissionId?: string | null
+  cloudVersionId?: string | null
+  cloudReleaseId?: string | null
+  contentDigest?: string | null
   id: number | string
   payloadDocumentId: string
   stableKey: string
@@ -53,6 +57,29 @@ type CloudDraft = {
   draft_id: string
   revision: number
   status: string
+}
+
+type CloudSubmission = {
+  content_digest: string
+  definition_id: string
+  status: string
+  submission_id: string
+}
+
+type CloudDeliveryTargetRelease = {
+  channel: string
+  current_revision_id: string
+  release_id: string
+  state: string
+  version_id: string
+}
+
+type CloudDeliveryTarget = {
+  content_digest: string
+  definition_id: string
+  releases: CloudDeliveryTargetRelease[]
+  submission_id: string
+  version_id: string
 }
 
 const requestIDPattern = /^[A-Za-z0-9._:-]{1,128}$/
@@ -118,6 +145,50 @@ function cloudDraft(value: unknown): CloudDraft | undefined {
     return undefined
   }
   return data as unknown as CloudDraft
+}
+
+function cloudSubmission(value: unknown): CloudSubmission | undefined {
+  const data = record(value)
+  if (
+    !data ||
+    typeof data.submission_id !== 'string' ||
+    typeof data.definition_id !== 'string' ||
+    typeof data.content_digest !== 'string' ||
+    typeof data.status !== 'string'
+  ) {
+    return undefined
+  }
+  return data as unknown as CloudSubmission
+}
+
+function cloudDeliveryTarget(value: unknown): CloudDeliveryTarget | undefined {
+  const data = record(value)
+  if (
+    !data ||
+    typeof data.submission_id !== 'string' ||
+    typeof data.definition_id !== 'string' ||
+    typeof data.content_digest !== 'string' ||
+    typeof data.version_id !== 'string' ||
+    !Array.isArray(data.releases)
+  ) {
+    return undefined
+  }
+  const releases: CloudDeliveryTargetRelease[] = []
+  for (const value of data.releases) {
+    const release = record(value)
+    if (
+      !release ||
+      typeof release.release_id !== 'string' ||
+      typeof release.current_revision_id !== 'string' ||
+      typeof release.version_id !== 'string' ||
+      typeof release.channel !== 'string' ||
+      typeof release.state !== 'string'
+    ) {
+      return undefined
+    }
+    releases.push(release as unknown as CloudDeliveryTargetRelease)
+  }
+  return { ...(data as unknown as CloudDeliveryTarget), releases }
 }
 
 function relationID(value: unknown): number | string | undefined {
@@ -311,6 +382,73 @@ async function auditDelivery(
   })
 }
 
+async function reconcileReleasedAgentLink(
+  req: PayloadRequest,
+  link: DeliveryLink,
+  executeCloud: ContentDeliveryCloudExecutor,
+): Promise<DeliveryLink> {
+  if (
+    typeof link.cloudDefinitionId !== 'string' ||
+    typeof link.cloudSubmissionId !== 'string' ||
+    typeof link.contentDigest !== 'string'
+  ) {
+    return link
+  }
+
+  const targetEnvelope = await executeCloud(req, {
+    operation: 'getOfficialSubmission',
+    params: { submission_id: link.cloudSubmissionId },
+  })
+  const submission = cloudSubmission(targetEnvelope.data)
+  if (
+    !submission ||
+    submission.submission_id !== link.cloudSubmissionId ||
+    submission.definition_id !== link.cloudDefinitionId ||
+    submission.content_digest !== link.contentDigest ||
+    submission.status !== 'approved'
+  ) {
+    return link
+  }
+
+  const deliveryEnvelope = await executeCloud(req, {
+    operation: 'getOfficialDeliveryTarget',
+    params: { submission_id: link.cloudSubmissionId },
+  })
+  const target = cloudDeliveryTarget(deliveryEnvelope.data)
+  if (
+    !target ||
+    target.submission_id !== link.cloudSubmissionId ||
+    target.definition_id !== link.cloudDefinitionId ||
+    target.content_digest !== link.contentDigest ||
+    !uuidPattern.test(target.version_id) ||
+    target.releases.some((release) => release.version_id !== target.version_id)
+  ) {
+    return link
+  }
+
+  const active = target.releases.filter((release) => release.state === 'active')
+  const release = active.find((item) => item.channel === 'internal') ?? active[0]
+  if (!release) {
+    return saveLink(req, link, {
+      cloudReleaseId: null,
+      cloudVersionId: target.version_id,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      lastRequestId: deliveryEnvelope.requestId,
+      syncStatus: 'approved',
+    })
+  }
+
+  return saveLink(req, link, {
+    cloudReleaseId: release.release_id,
+    cloudVersionId: target.version_id,
+    lastErrorCode: null,
+    lastErrorSummary: null,
+    lastRequestId: deliveryEnvelope.requestId,
+    syncStatus: 'released',
+  })
+}
+
 export function createContentDeliveryEndpoints(
   executeCloud: ContentDeliveryCloudExecutor = defaultCloudExecutor(),
 ): Endpoint[] {
@@ -425,7 +563,11 @@ export function createContentDeliveryEndpoints(
       link = await saveLink(req, link, {
         cloudDefinitionId: definitionID,
         cloudDraftId: draftID,
+        cloudReleaseId: null,
+        cloudSubmissionId: null,
+        cloudVersionId: null,
         contentDigest: verified.content_digest,
+        desktopVerification: null,
         lastErrorCode: null,
         lastErrorSummary: null,
         lastOperationId: lastOperationID,
@@ -548,7 +690,6 @@ export function createContentDeliveryEndpoints(
   const readStatus: PayloadHandler = async (req) => {
     const currentRequestID = requestID(req)
     try {
-      requireCapability(req, 'content:publish:read')
       const resourceType = routeParam(req, 'resourceType')
       const id = routeParam(req, 'id')
       if (
@@ -557,10 +698,57 @@ export function createContentDeliveryEndpoints(
       ) {
         throw new DeliveryEndpointError(400, 'INVALID_RESOURCE', '内容资源参数不合法。')
       }
+      requireCapability(
+        req,
+        resourceType === 'agent' ? 'official-agents:read' : 'content:publish:read',
+      )
       const link = await findLink(req, resourceType, id)
       if (!link)
         throw new DeliveryEndpointError(404, 'DELIVERY_LINK_NOT_FOUND', '尚无内容交付记录。')
-      return Response.json({ data: safeLink(link), meta: {}, requestId: currentRequestID })
+      let current = link
+      if (
+        resourceType === 'agent' &&
+        typeof current.cloudDefinitionId === 'string' &&
+        typeof current.cloudSubmissionId === 'string' &&
+        typeof current.contentDigest === 'string' &&
+        (!current.cloudReleaseId || !current.cloudVersionId)
+      ) {
+        current = await reconcileReleasedAgentLink(req, current, executeCloud)
+      }
+      if (
+        resourceType === 'agent' &&
+        typeof current.cloudReleaseId === 'string' &&
+        typeof current.cloudVersionId === 'string' &&
+        typeof current.contentDigest === 'string'
+      ) {
+        const envelope = await executeCloud(req, {
+          operation: 'getOfficialDeliveryVerificationSummary',
+          params: { release_id: current.cloudReleaseId },
+        })
+        const verification = deliveryVerificationForLink(
+          {
+            cloudDefinitionId: current.cloudDefinitionId,
+            cloudReleaseId: current.cloudReleaseId,
+            cloudVersionId: current.cloudVersionId,
+            contentDigest: current.contentDigest,
+          },
+          envelope.data,
+        )
+        const summary = record(envelope.data)
+        if (!summary || summary.release_id !== current.cloudReleaseId || !Array.isArray(summary.stages)) {
+          throw new DeliveryEndpointError(
+            409,
+            'CLOUD_DELIVERY_VERIFICATION_MISMATCH',
+            'Cloud 交付验证与当前发布记录不匹配。',
+          )
+        }
+        current = await saveLink(req, current, {
+          desktopVerification: verification,
+          lastRequestId: envelope.requestId,
+          syncStatus: verification.syncStatus,
+        })
+      }
+      return Response.json({ data: safeLink(current), meta: {}, requestId: currentRequestID })
     } catch (error) {
       return mapError(error, currentRequestID)
     }
