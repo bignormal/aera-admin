@@ -99,6 +99,7 @@ export async function seedCatalog(payload: Payload) {
       collection: 'skill-catalog',
       data: {
         active: true,
+        distributionClass: 'runtime_public',
         key: 'general-research',
         name: '通用研究',
         runtimeSkillId: 'web-research',

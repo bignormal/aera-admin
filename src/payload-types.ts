@@ -227,7 +227,8 @@ export interface SkillCatalog {
   key: string;
   name: string;
   description?: string | null;
-  runtimeSkillId: string;
+  distributionClass: 'runtime_public' | 'cloud_proprietary';
+  runtimeSkillId?: string | null;
   minimumRuntimeVersion?: string | null;
   active: boolean;
   updatedAt: string;
@@ -849,6 +850,7 @@ export interface SkillCatalogSelect<T extends boolean = true> {
   key?: T;
   name?: T;
   description?: T;
+  distributionClass?: T;
   runtimeSkillId?: T;
   minimumRuntimeVersion?: T;
   active?: T;

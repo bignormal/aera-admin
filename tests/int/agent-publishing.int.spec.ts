@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { assignReleaseVersion, validateAgentPublish } from '../../src/domain/publishing'
+import {
+  assignReleaseVersion,
+  validateAgentPublish,
+  validateSkillDistribution,
+} from '../../src/domain/publishing'
 import { clearCatalogData, getTestPayload } from '../helpers/payload'
 
 const png = Buffer.from(
@@ -65,6 +69,60 @@ describe('publishing domain rules', () => {
       },
     })
   })
+
+  it('rejects a proprietary skill in a Desktop-deliverable official Agent', async () => {
+    const findByID = async ({ collection }: { collection: string }) =>
+      collection === 'expert-categories'
+        ? { active: true }
+        : {
+            active: true,
+            distributionClass: 'cloud_proprietary',
+            runtimeSkillId: 'private-search',
+          }
+
+    await expect(
+      validateAgentPublish({
+        data: {
+          _status: 'published',
+          category: 1,
+          minimumRuntimeVersion: '0.18.2-agentera.1',
+          skills: [2],
+        },
+        originalDoc: undefined,
+        req: { payload: { findByID } },
+      } as never),
+    ).rejects.toMatchObject({
+      data: {
+        errors: expect.arrayContaining([
+          expect.objectContaining({
+            message: '第一版官方 Agent 只能使用 runtime_public 技能。',
+            path: 'skills',
+          }),
+        ]),
+      },
+    })
+  })
+
+  it('requires a stable Runtime identifier only for runtime_public skills', async () => {
+    await expect(
+      validateSkillDistribution({
+        data: { distributionClass: 'runtime_public', runtimeSkillId: '' },
+        originalDoc: undefined,
+        req: {},
+      } as never),
+    ).rejects.toMatchObject({
+      data: {
+        errors: expect.arrayContaining([expect.objectContaining({ path: 'runtimeSkillId' })]),
+      },
+    })
+    await expect(
+      validateSkillDistribution({
+        data: { distributionClass: 'cloud_proprietary', runtimeSkillId: '' },
+        originalDoc: undefined,
+        req: {},
+      } as never),
+    ).resolves.toMatchObject({ distributionClass: 'cloud_proprietary' })
+  })
 })
 
 describe('official Agent publishing', () => {
@@ -88,6 +146,7 @@ describe('official Agent publishing', () => {
       collection: 'skill-catalog',
       data: {
         active: true,
+        distributionClass: 'runtime_public',
         key: 'documents',
         name: '文档分析',
         runtimeSkillId: 'document-analysis',

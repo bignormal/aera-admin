@@ -12,6 +12,7 @@ interface RelatedMedia {
 
 interface RelatedSkill {
   active?: boolean
+  distributionClass?: 'cloud_proprietary' | 'runtime_public'
   key: string
   runtimeSkillId: string
 }
@@ -49,7 +50,9 @@ export function buildCatalog(
       releaseVersion: doc.releaseVersion,
       rolePrompt: doc.rolePrompt,
       skills: (doc.skills || [])
-        .filter((skill) => skill.active !== false)
+        .filter(
+          (skill) => skill.active !== false && skill.distributionClass !== 'cloud_proprietary',
+        )
         .map((skill) => ({ key: skill.key, runtimeSkillId: skill.runtimeSkillId })),
       tags: (doc.tags || []).map((tag) => tag.value),
       templateKey: doc.templateKey,
