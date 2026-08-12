@@ -25,6 +25,12 @@ export type OfficialPage<T> = {
   next_cursor?: string;
 };
 
+export type OfficialWorkbenchState = 'empty' | 'ready';
+
+export function officialWorkbenchState(pages: readonly OfficialPage<unknown>[]): OfficialWorkbenchState {
+  return pages.some(page => page.items.length > 0) ? 'ready' : 'empty';
+}
+
 export type OfficialOperationOutcome = CloudSchemas['Operation'];
 export type DraftValidation = CloudSchemas['OfficialDraftValidation'];
 export type OfficialDefinitionPayload = CloudSchemas['OfficialDefinitionMutation']['payload'];

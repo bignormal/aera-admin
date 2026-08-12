@@ -20,6 +20,7 @@ import {
   listOfficialSubmissions,
   listOfficialVersions,
   listRollbackRequests,
+  officialWorkbenchState,
   pauseOfficialRelease,
   reserveOfficialDefinition,
   resumeOfficialRelease,
@@ -64,6 +65,17 @@ const versions = ref<OfficialVersion[]>([]);
 const releases = ref<OfficialRelease[]>([]);
 const rollbacks = ref<RollbackRequest[]>([]);
 const auditEvents = ref<OfficialAgentAuditEvent[]>([]);
+
+const workbenchState = computed(() =>
+  officialWorkbenchState([
+    { items: definitions.value },
+    { items: drafts.value },
+    { items: submissions.value },
+    { items: versions.value },
+    { items: releases.value },
+    { items: auditEvents.value }
+  ])
+);
 
 function date(value?: string | null) {
   if (!value) return '—';
@@ -661,6 +673,12 @@ onMounted(() => {
     <NAlert type="warning" :show-icon="false">当前角色无权查看官方 Agent 工作台。</NAlert>
   </div>
   <div v-else class="flex flex-col gap-16px">
+    <NAlert v-if="state === 'ready' && workbenchState === 'empty'" type="info" :show-icon="false">
+      Cloud 真实接口已连接，当前定义、草稿、审核、版本、发布和审计事件均返回 0 条；这里不会填充演示数据。
+    </NAlert>
+    <NAlert v-else-if="state === 'ready'" type="success" :show-icon="false">
+      Cloud 官方 Agent 管理接口已连接，以下数量均来自真实 Cloud 数据。
+    </NAlert>
     <NSpace justify="end">
       <NButton v-if="canDraft" type="primary" @click="openAction('create-definition', '新建官方 Agent 定义')">
         新建定义

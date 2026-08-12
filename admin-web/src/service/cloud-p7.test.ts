@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { callCloud } from './cloud';
 import { getCloudDeviceStats, getCloudOperation } from './cloud-users';
-import { listOfficialAgentAuditEvents } from './cloud-official-agents';
+import { listOfficialAgentAuditEvents, officialWorkbenchState } from './cloud-official-agents';
 
 vi.mock('./cloud', () => ({ callCloud: vi.fn() }));
 
@@ -48,5 +48,10 @@ describe('cloud P7 service additions', () => {
       params: { cursor: 'cur-1', limit: 25 },
       signal: undefined
     });
+  });
+
+  it('keeps an empty Cloud workbench distinct from an unavailable request', () => {
+    expect(officialWorkbenchState([{ items: [] }, { items: [] }])).toBe('empty');
+    expect(officialWorkbenchState([{ items: [] }, { items: [{ id: 'release-1' }] }])).toBe('ready');
   });
 });
