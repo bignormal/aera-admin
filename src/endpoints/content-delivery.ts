@@ -394,19 +394,21 @@ async function reconcileReleasedAgentLink(
     return link
   }
 
-  const targetEnvelope = await executeCloud(req, {
-    operation: 'getOfficialSubmission',
-    params: { submission_id: link.cloudSubmissionId },
-  })
-  const submission = cloudSubmission(targetEnvelope.data)
-  if (
-    !submission ||
-    submission.submission_id !== link.cloudSubmissionId ||
-    submission.definition_id !== link.cloudDefinitionId ||
-    submission.content_digest !== link.contentDigest ||
-    submission.status !== 'approved'
-  ) {
-    return link
+  if (req.user?.role !== 'operations_admin') {
+    const submissionEnvelope = await executeCloud(req, {
+      operation: 'getOfficialSubmission',
+      params: { submission_id: link.cloudSubmissionId },
+    })
+    const submission = cloudSubmission(submissionEnvelope.data)
+    if (
+      !submission ||
+      submission.submission_id !== link.cloudSubmissionId ||
+      submission.definition_id !== link.cloudDefinitionId ||
+      submission.content_digest !== link.contentDigest ||
+      submission.status !== 'approved'
+    ) {
+      return link
+    }
   }
 
   const deliveryEnvelope = await executeCloud(req, {

@@ -571,6 +571,82 @@ describe('content delivery endpoints', () => {
     ])
   })
 
+  it('lets an operations admin reconcile through the approved delivery target without reading submissions', async () => {
+    const submissionID = '33333333-3333-4333-8333-333333333333'
+    const versionID = '44444444-4444-4444-8444-444444444444'
+    const releaseID = '55555555-5555-4555-8555-555555555555'
+    const contentDigest = 'a'.repeat(64)
+    const link = {
+      cloudDefinitionId: definitionID,
+      cloudSubmissionId: submissionID,
+      contentDigest,
+      id: 9,
+      payloadDocumentId: '7',
+      stableKey: 'research-expert',
+      syncStatus: 'submitted',
+    }
+    const cloud = vi.fn(async (_req, input) => {
+      if (input.operation === 'getOfficialSubmission') {
+        throw new Error('operations admin must not read submission content')
+      }
+      if (input.operation === 'getOfficialDeliveryTarget') {
+        return {
+          data: {
+            content_digest: contentDigest,
+            definition_id: definitionID,
+            releases: [
+              {
+                channel: 'internal',
+                current_revision_id: '66666666-6666-4666-8666-666666666666',
+                release_id: releaseID,
+                state: 'active',
+                version_id: versionID,
+              },
+            ],
+            submission_id: submissionID,
+            version_id: versionID,
+          },
+          requestId: 'content-delivery-operator-1',
+        }
+      }
+      if (input.operation === 'getOfficialDeliveryVerificationSummary') {
+        return {
+          data: { release_id: releaseID, stages: [] },
+          requestId: 'content-delivery-operator-2',
+        }
+      }
+      throw new Error(`unexpected operation ${input.operation}`)
+    })
+    let persisted = link as Record<string, unknown>
+    const update = vi.fn(async ({ data }) => {
+      persisted = { ...persisted, ...data }
+      return persisted
+    })
+    const endpoints = createContentDeliveryEndpoints(cloud)
+    const endpoint = endpoints.find((item) => item.path === '/content-delivery/:resourceType/:id')
+
+    const response = await endpoint!.handler({
+      headers: new Headers(),
+      method: 'GET',
+      payload: { find: vi.fn().mockResolvedValue({ docs: [link] }), update },
+      routeParams: { id: '7', resourceType: 'agent' },
+      user: { id: 3, role: 'operations_admin' },
+    } as never)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        cloudReleaseId: releaseID,
+        cloudVersionId: versionID,
+        syncStatus: 'released',
+      },
+    })
+    expect(cloud.mock.calls.map(([, input]) => input.operation)).toEqual([
+      'getOfficialDeliveryTarget',
+      'getOfficialDeliveryVerificationSummary',
+    ])
+  })
+
   it('keeps an approved version out of Desktop delivery until a Release is active', async () => {
     const submissionID = '33333333-3333-4333-8333-333333333333'
     const versionID = '44444444-4444-4444-8444-444444444444'
