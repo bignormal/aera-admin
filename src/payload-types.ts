@@ -77,6 +77,7 @@ export interface Config {
     'integration-settings': IntegrationSetting;
     'audit-logs': AuditLog;
     'cloud-operation-receipts': CloudOperationReceipt;
+    'content-delivery-links': ContentDeliveryLink;
     'official-rollback-requests': OfficialRollbackRequest;
     'runtime-instances': RuntimeInstance;
     'runtime-releases': RuntimeRelease;
@@ -99,6 +100,7 @@ export interface Config {
     'integration-settings': IntegrationSettingsSelect<false> | IntegrationSettingsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
     'cloud-operation-receipts': CloudOperationReceiptsSelect<false> | CloudOperationReceiptsSelect<true>;
+    'content-delivery-links': ContentDeliveryLinksSelect<false> | ContentDeliveryLinksSelect<true>;
     'official-rollback-requests': OfficialRollbackRequestsSelect<false> | OfficialRollbackRequestsSelect<true>;
     'runtime-instances': RuntimeInstancesSelect<false> | RuntimeInstancesSelect<true>;
     'runtime-releases': RuntimeReleasesSelect<false> | RuntimeReleasesSelect<true>;
@@ -462,6 +464,48 @@ export interface CloudOperationReceipt {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "content-delivery-links".
+ */
+export interface ContentDeliveryLink {
+  id: number;
+  resourceType: 'agent' | 'category' | 'skill' | 'plugin';
+  payloadDocumentId: string;
+  stableKey: string;
+  cloudDefinitionId?: string | null;
+  cloudDraftId?: string | null;
+  cloudSubmissionId?: string | null;
+  cloudVersionId?: string | null;
+  cloudReleaseId?: string | null;
+  payloadRevision?: number | null;
+  contentDigest?: string | null;
+  runtimeManifestSha256?: string | null;
+  syncStatus:
+    | 'local_only'
+    | 'draft_synced'
+    | 'validation_failed'
+    | 'submitted'
+    | 'approved'
+    | 'released'
+    | 'desktop_verified'
+    | 'failed';
+  lastOperationId?: string | null;
+  lastRequestId?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorSummary?: string | null;
+  desktopVerification?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "official-rollback-requests".
  */
 export interface OfficialRollbackRequest {
@@ -668,6 +712,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'cloud-operation-receipts';
         value: number | CloudOperationReceipt;
+      } | null)
+    | ({
+        relationTo: 'content-delivery-links';
+        value: number | ContentDeliveryLink;
       } | null)
     | ({
         relationTo: 'official-rollback-requests';
@@ -950,6 +998,31 @@ export interface CloudOperationReceiptsSelect<T extends boolean = true> {
   auditCompletedAt?: T;
   rollbackCompletedAt?: T;
   upstreamRequestId?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "content-delivery-links_select".
+ */
+export interface ContentDeliveryLinksSelect<T extends boolean = true> {
+  resourceType?: T;
+  payloadDocumentId?: T;
+  stableKey?: T;
+  cloudDefinitionId?: T;
+  cloudDraftId?: T;
+  cloudSubmissionId?: T;
+  cloudVersionId?: T;
+  cloudReleaseId?: T;
+  payloadRevision?: T;
+  contentDigest?: T;
+  runtimeManifestSha256?: T;
+  syncStatus?: T;
+  lastOperationId?: T;
+  lastRequestId?: T;
+  lastErrorCode?: T;
+  lastErrorSummary?: T;
+  desktopVerification?: T;
   updatedAt?: T;
   createdAt?: T;
 }

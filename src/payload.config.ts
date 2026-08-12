@@ -10,6 +10,7 @@ import { Admins } from './collections/Admins'
 import { AgentTemplates } from './collections/AgentTemplates'
 import { AuditLogs } from './collections/AuditLogs'
 import { CloudOperationReceipts } from './collections/CloudOperationReceipts'
+import { ContentDeliveryLinks } from './collections/ContentDeliveryLinks'
 import { ExpertCategories } from './collections/ExpertCategories'
 import { IntegrationSettings } from './collections/IntegrationSettings'
 import { Media } from './collections/Media'
@@ -60,6 +61,7 @@ export default buildConfig({
     IntegrationSettings,
     AuditLogs,
     CloudOperationReceipts,
+    ContentDeliveryLinks,
     OfficialRollbackRequests,
     RuntimeInstances,
     RuntimeReleases,
