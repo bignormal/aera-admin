@@ -40,6 +40,24 @@ export type OfficialReviewPayload = CloudSchemas['OfficialReviewMutation']['payl
 export type OfficialActivatePayload = CloudSchemas['OfficialActivateMutation']['payload'];
 export type OfficialRolloutPayload = CloudSchemas['OfficialRolloutMutation']['payload'];
 
+export type LocalAdminRole = 'auditor' | 'finance_admin' | 'operations_admin' | 'publisher' | 'super_admin';
+export type ReleaseAction = 'activate' | 'pause' | 'resume' | 'rollout';
+
+/**
+ * Projects the Cloud release state into actions allowed for the current local
+ * administrator. The BFF/Cloud capability checks remain authoritative.
+ */
+export function releaseActionsFor(input: {
+  role: LocalAdminRole | '';
+  status: 'active' | 'approved' | 'paused';
+}): ReleaseAction[] {
+  if (input.role !== 'operations_admin') return [];
+  if (input.status === 'approved') return ['activate'];
+  if (input.status === 'active') return ['rollout', 'pause'];
+  if (input.status === 'paused') return ['rollout', 'resume'];
+  return [];
+}
+
 // 官方 Agent 变更统一入参：BFF 会包装成 officialMutationEnvelope 并生成 operation_id。
 export type OfficialMutationInput<T = Record<string, unknown>> = {
   expected_revision: number;

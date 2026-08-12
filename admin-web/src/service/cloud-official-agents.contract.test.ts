@@ -1,6 +1,6 @@
-import { expectTypeOf, it } from 'vitest';
+import { expect, expectTypeOf, it } from 'vitest';
 import type { OfficialDraft, OfficialRelease, OfficialSubmission, OfficialVersion } from './cloud-official-agents';
-import { reviewOfficialSubmission } from './cloud-official-agents';
+import { releaseActionsFor, reviewOfficialSubmission } from './cloud-official-agents';
 
 it('uses the canonical generated official Agent wire vocabulary', () => {
   expectTypeOf<OfficialDraft['kind']>().toEqualTypeOf<'initial' | 'next'>();
@@ -15,4 +15,11 @@ it('uses the canonical generated official Agent wire vocabulary', () => {
   expectTypeOf<ReviewInput['payload']['initial_channels']>().toEqualTypeOf<
     readonly ('internal' | 'stable')[] | undefined
   >();
+});
+
+it('projects release actions by local role and release state', () => {
+  expect(releaseActionsFor({ role: 'publisher', status: 'approved' })).toEqual([]);
+  expect(releaseActionsFor({ role: 'operations_admin', status: 'approved' })).toEqual(['activate']);
+  expect(releaseActionsFor({ role: 'operations_admin', status: 'active' })).toEqual(['rollout', 'pause']);
+  expect(releaseActionsFor({ role: 'operations_admin', status: 'paused' })).toEqual(['rollout', 'resume']);
 });

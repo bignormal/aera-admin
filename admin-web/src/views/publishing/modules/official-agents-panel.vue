@@ -5,6 +5,7 @@ import type { DataTableColumns } from 'naive-ui';
 import { NButton, NSpace, NTag, NText } from 'naive-ui';
 import { useCapability } from '@/composables/use-capability';
 import { useStepUp } from '@/composables/use-step-up';
+import { useAuthStore } from '@/store/modules/auth';
 import { CloudServiceError } from '@/service/cloud';
 import {
   activateOfficialRelease,
@@ -21,6 +22,7 @@ import {
   listOfficialVersions,
   listRollbackRequests,
   officialWorkbenchState,
+  releaseActionsFor,
   pauseOfficialRelease,
   reserveOfficialDefinition,
   resumeOfficialRelease,
@@ -49,11 +51,13 @@ import {
 defineOptions({ name: 'OfficialAgentsPanel' });
 
 const { can } = useCapability();
+const authStore = useAuthStore();
 const canRead = computed(() => can('official-agents:read'));
 const canDraft = computed(() => can('official-agents:draft:write'));
 const canReview = computed(() => can('official-agents:review:write'));
-const canRelease = computed(() => can('official-agents:release:write'));
 const canRollback = computed(() => can('official-agents:rollback:write'));
+const releaseActions = (row: OfficialRelease) =>
+  releaseActionsFor({ role: authStore.userInfo.role, status: row.state });
 const { onStepUpCancelled, onStepUpVerified, runProtected, showStepUp } = useStepUp();
 
 const loading = ref(false);
@@ -543,10 +547,11 @@ const releaseColumns: DataTableColumns<OfficialRelease> = [
     title: '操作',
     key: 'actions',
     width: 320,
-    render: row =>
-      canRelease.value || canRollback.value
+    render: row => {
+      const actions = releaseActions(row);
+      return canRollback.value || actions.length
         ? h(NSpace, { size: 8 }, () => [
-            canRelease.value
+            actions.includes('activate')
               ? h(
                   NButton,
                   {
@@ -557,25 +562,25 @@ const releaseColumns: DataTableColumns<OfficialRelease> = [
                   () => '激活'
                 )
               : null,
-            canRelease.value
+            actions.includes('rollout')
               ? h(
                   NButton,
                   { text: true, onClick: () => openAction('rollout-release', '调整灰度', { release: row }) },
                   () => '灰度'
                 )
               : null,
-            canRelease.value
-              ? row.state === 'paused'
+            actions.includes('resume')
+              ? h(
+                  NButton,
+                  {
+                    text: true,
+                    type: 'info',
+                    onClick: () => openAction('simple-release', '恢复发布', { release: row, releaseAction: 'resume' })
+                  },
+                  () => '恢复'
+                )
+              : actions.includes('pause')
                 ? h(
-                    NButton,
-                    {
-                      text: true,
-                      type: 'info',
-                      onClick: () => openAction('simple-release', '恢复发布', { release: row, releaseAction: 'resume' })
-                    },
-                    () => '恢复'
-                  )
-                : h(
                     NButton,
                     {
                       text: true,
@@ -584,7 +589,7 @@ const releaseColumns: DataTableColumns<OfficialRelease> = [
                     },
                     () => '暂停'
                   )
-              : null,
+                : null,
             canRollback.value
               ? h(
                   NButton,
@@ -597,7 +602,8 @@ const releaseColumns: DataTableColumns<OfficialRelease> = [
                 )
               : null
           ])
-        : '只读'
+        : '只读';
+    }
   }
 ];
 
