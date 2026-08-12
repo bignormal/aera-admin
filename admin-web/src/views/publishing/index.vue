@@ -22,6 +22,7 @@ type PublishingRow = {
   type: string;
   updatedAt: string;
   version: string;
+  deliveryStatus?: 'cloud_published' | 'contract_pending' | 'desktop_verified' | 'registered';
 };
 
 const { can } = useCapability();
@@ -34,6 +35,23 @@ const columns: DataTableColumns<PublishingRow> = [
   { title: '类型', key: 'type' },
   { title: '名称', key: 'name' },
   { title: '版本', key: 'version' },
+  {
+    title: 'Desktop 交付',
+    key: 'deliveryStatus',
+    render: row =>
+      row.type !== '插件'
+        ? '—'
+        : h(
+            NTag,
+            { bordered: false, type: row.deliveryStatus === 'desktop_verified' ? 'success' : 'warning' },
+            () =>
+              row.deliveryStatus === 'desktop_verified'
+                ? 'Desktop 已验证'
+                : row.deliveryStatus === 'contract_pending'
+                  ? '等待插件消费协议'
+                  : '仅后台登记'
+          )
+  },
   {
     title: '状态',
     key: 'status',
@@ -99,7 +117,8 @@ async function load() {
         status: item['_status'] === 'published' ? ('published' as const) : ('draft' as const),
         type: '插件',
         updatedAt: item.updatedAt,
-        version: item.version
+        version: item.version,
+        deliveryStatus: item.deliveryStatus
       })),
       ...pets.docs.map(item => ({
         collection: 'pet-assets' as const,

@@ -277,6 +277,7 @@ export interface PluginCatalog {
   installKind: 'standalone_plugin' | 'pip_entry_point' | 'runtime_bundled';
   artifactURL: string;
   checksum: string;
+  deliveryStatus: 'registered' | 'contract_pending' | 'cloud_published' | 'desktop_verified';
   compatibility?: {
     minimumRuntimeVersion?: string | null;
     maximumRuntimeVersion?: string | null;
@@ -898,6 +899,7 @@ export interface PluginCatalogSelect<T extends boolean = true> {
   installKind?: T;
   artifactURL?: T;
   checksum?: T;
+  deliveryStatus?: T;
   compatibility?:
     | T
     | {

@@ -19,4 +19,11 @@ describe('plugin service', () => {
       body: { name: '网页搜索' }
     });
   });
+
+  it('keeps the Desktop delivery status server-derived and read-only', async () => {
+    vi.mocked(apiRequest).mockResolvedValueOnce({ docs: [{ id: 1, deliveryStatus: 'registered' }], totalDocs: 1 });
+    await expect(listPlugins({ page: 1, limit: 10, search: '', sort: '-updatedAt' })).resolves.toMatchObject({
+      docs: [{ deliveryStatus: 'registered' }]
+    });
+  });
 });

@@ -1,3 +1,5 @@
+import type { CollectionBeforeValidateHook } from 'payload'
+
 export const deliveryStatuses = [
   'local_only',
   'draft_synced',
@@ -39,6 +41,12 @@ export function deliveryStatusFor(input: {
 export type PluginDeliveryStatus =
   'registered' | 'contract_pending' | 'cloud_published' | 'desktop_verified'
 
+/** Until a signed Cloud/Desktop plugin contract exists, only local registration is allowed. */
+export const enforcePluginDeliveryStatus: CollectionBeforeValidateHook = ({ data }) => ({
+  ...data,
+  deliveryStatus: 'registered',
+})
+
 export function pluginDeliveryStatus(input: {
   cloudReleaseId: string | null
   desktopContract: boolean
@@ -48,7 +56,7 @@ export function pluginDeliveryStatus(input: {
     return 'desktop_verified'
   }
   if (input.cloudReleaseId && input.desktopContract) return 'cloud_published'
-  if (input.cloudReleaseId || !input.desktopContract) return 'contract_pending'
+  if (input.cloudReleaseId && !input.desktopContract) return 'contract_pending'
   return 'registered'
 }
 
