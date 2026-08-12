@@ -24,6 +24,7 @@ import { RuntimeReleases } from './collections/RuntimeReleases'
 import { SkillCatalog } from './collections/SkillCatalog'
 import { catalogEndpoint } from './endpoints/catalog'
 import { cloudEndpoints } from './endpoints/cloud'
+import { contentDeliveryEndpoints } from './endpoints/content-delivery'
 import { officialRollbackEndpoints } from './endpoints/official-rollback'
 import { platformEndpoints } from './endpoints/platform'
 import { platformReadinessEndpoint } from './endpoints/platform-readiness'
@@ -84,6 +85,7 @@ export default buildConfig({
     platformReadinessEndpoint,
     ...platformEndpoints,
     ...cloudEndpoints,
+    ...contentDeliveryEndpoints,
     ...officialRollbackEndpoints,
     ...runtimeControlEndpoints,
     ...securityEndpoints,

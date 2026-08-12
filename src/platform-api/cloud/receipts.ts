@@ -17,11 +17,12 @@ export type PendingCloudOperationReceipt = {
   operationKey: string
   request: {
     actor: JsonObject | null
-    body: JsonValue
+    body: JsonValue | null
     idempotencyKey: string
     method: string
     path: string
     query: string
+    replayable: boolean
     requestId: string
   }
   requestId: string
@@ -195,6 +196,7 @@ function receiptRequest(receipt: ReconciliationReceipt): CloudUpstreamRequest | 
   const request = receipt.request
   if (
     !request ||
+    request.replayable !== true ||
     request.idempotencyKey !== receipt.operationId ||
     request.requestId !== receipt.requestId ||
     (request.method !== 'PATCH' && request.method !== 'POST') ||
@@ -247,7 +249,7 @@ async function appendReceiptAuditOnce(
   try {
     await appendAuditLog(req, {
       action: `cloud.${receipt.operationKey}`,
-      after: receipt.request.body,
+      after: receipt.request.replayable ? receipt.request.body : { replayable: false },
       capability: receipt.capability as Capability,
       errorCode: snapshot.errorCode,
       operationId: receipt.operationId,

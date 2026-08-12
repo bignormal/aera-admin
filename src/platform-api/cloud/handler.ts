@@ -312,6 +312,21 @@ function isAmbiguousMutationError(error: unknown): boolean {
   )
 }
 
+function containsPrivateDraftContent(operationKey: string): boolean {
+  return operationKey === 'createOfficialDraft' || operationKey === 'updateOfficialDraft'
+}
+
+function mutationAuditSnapshot(operationKey: string, body: unknown): unknown {
+  if (!containsPrivateDraftContent(operationKey)) return body
+  const envelope = asRecord(body)
+  return {
+    expected_revision: envelope?.expected_revision,
+    operation_id: envelope?.operation_id,
+    reason_code: envelope?.reason_code,
+    replayable: false,
+  }
+}
+
 async function markRollbackExecuted(
   req: PayloadRequest,
   rollbackRequestId: number | string,
@@ -456,6 +471,7 @@ export function createCloudHandler(
     }
 
     if (durableMutation && prepared.idempotencyKey) {
+      const replayable = !containsPrivateDraftContent(operationKey)
       try {
         await persistPendingCloudOperationReceipt(req, {
           actorAdminId: identity.adminUUID,
@@ -467,11 +483,12 @@ export function createCloudHandler(
           operationKey,
           request: {
             actor: prepared.actor ?? null,
-            body: prepared.body,
+            body: replayable ? prepared.body : null,
             idempotencyKey: prepared.idempotencyKey,
             method: operation.method,
             path: operation.upstreamPath(params),
             query: url.searchParams.toString(),
+            replayable,
             requestId: currentRequestID,
           },
           requestId: currentRequestID,
@@ -572,7 +589,7 @@ export function createCloudHandler(
           const auditCompleted =
             !terminal ||
             (await auditCloudMutation(req, {
-              after: prepared.body,
+              after: mutationAuditSnapshot(operationKey, prepared.body),
               capability: operation.capability,
               errorCode:
                 typeof operationResult.error_code === 'string'
@@ -629,7 +646,7 @@ export function createCloudHandler(
           : new PlatformAPIError('UPSTREAM_UNEXPECTED_ERROR', 502, currentRequestID)
       if (durableMutation) {
         const auditCompleted = await auditCloudMutation(req, {
-          after: prepared.body,
+          after: mutationAuditSnapshot(operationKey, prepared.body),
           capability: operation.capability,
           errorCode: platformError.code,
           operation: operationKey,

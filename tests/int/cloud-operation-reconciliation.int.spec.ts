@@ -36,6 +36,7 @@ function pendingReceipt(): PendingCloudOperationReceipt & {
       method: 'POST',
       path: '/sessions/7f3e9a10-6b2c-4d8e-9f01-abcdef012345/revoke',
       query: '',
+      replayable: true,
       requestId: 'cloud-request-1',
     },
     requestId: 'cloud-request-1',

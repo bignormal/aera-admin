@@ -459,6 +459,64 @@ describe('cloud BFF handler', () => {
     expect(JSON.stringify(receipt.request)).not.toContain('authorization')
   })
 
+  it('never persists or audits official draft prompt content for automatic replay', async () => {
+    const prompt = 'sensitive official draft prompt'
+    const create = vi.fn().mockResolvedValue({ id: 11 })
+    const update = vi.fn().mockResolvedValue({ docs: [{ id: 11 }] })
+    const upstream = vi.fn().mockImplementation((request) =>
+      Promise.resolve({
+        data: {
+          administrative_revision: 1,
+          operation_id: request.idempotencyKey,
+          status: 'succeeded',
+          target_id: actorUUID,
+          target_type: 'platform_draft',
+          updated_at: '2026-08-12T04:00:00.000Z',
+        },
+      }),
+    )
+    const handler = createCloudHandler(upstream)
+
+    const response = await handler(
+      handlerRequest({
+        body: {
+          expected_revision: 1,
+          payload: {
+            bundle: { assets: [] },
+            definition_id: actorUUID,
+            display_name: '安全草稿',
+            kind: 'initial',
+            manifest: {
+              assets: [],
+              dependencies: [],
+              identity: { system_prompt: prompt },
+              model_policy: { allowed_models: [], allowed_providers: [], mode: 'user_select' },
+              runtime_compatibility: { minimum_version: 'v0.18.2-agentera.1' },
+              schema_version: 2,
+              tools: { allowed: [], denied: [] },
+            },
+          },
+          reason_code: 'content_draft_sync',
+        },
+        create,
+        method: 'POST',
+        operation: 'createOfficialDraft',
+        role: 'publisher',
+        update,
+      }) as never,
+    )
+
+    expect(response.status).toBe(200)
+    const stored = create.mock.calls.find(
+      ([input]) => input.collection === 'cloud-operation-receipts',
+    )?.[0]
+    const audits = create.mock.calls.filter(([input]) => input.collection === 'audit-logs')
+    expect(stored.data.request).toMatchObject({ body: null, replayable: false })
+    expect(JSON.stringify(stored)).not.toContain(prompt)
+    expect(JSON.stringify(audits)).not.toContain(prompt)
+    expect(JSON.stringify(upstream.mock.calls)).toContain(prompt)
+  })
+
   it('queries Cloud immediately by operation id after an ambiguous mutation result', async () => {
     const upstream = vi.fn().mockImplementation((request) => {
       if (request.method === 'POST') {
