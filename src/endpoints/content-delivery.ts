@@ -373,7 +373,6 @@ async function auditDelivery(
     action,
     after: safeLink(link),
     capability: 'official-agents:draft:write',
-    operationId: typeof link.lastOperationId === 'string' ? link.lastOperationId : undefined,
     outcome: 'succeeded',
     requestId,
     resourceId: link.payloadDocumentId,
@@ -735,7 +734,11 @@ export function createContentDeliveryEndpoints(
           envelope.data,
         )
         const summary = record(envelope.data)
-        if (!summary || summary.release_id !== current.cloudReleaseId || !Array.isArray(summary.stages)) {
+        if (
+          !summary ||
+          summary.release_id !== current.cloudReleaseId ||
+          !Array.isArray(summary.stages)
+        ) {
           throw new DeliveryEndpointError(
             409,
             'CLOUD_DELIVERY_VERIFICATION_MISMATCH',

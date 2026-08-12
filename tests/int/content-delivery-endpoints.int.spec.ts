@@ -198,6 +198,12 @@ describe('content delivery endpoints', () => {
     ])
     expect(JSON.stringify(body)).not.toContain(agent.rolePrompt)
     expect(JSON.stringify(body)).not.toMatch(/api[_-]?key|private[_-]?key|authorization/i)
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'audit-logs',
+        data: expect.objectContaining({ operationId: undefined }),
+      }),
+    )
   })
 
   it('keeps a failed Cloud validation distinct from a submitted draft', async () => {
@@ -472,7 +478,10 @@ describe('content delivery endpoints', () => {
       }),
     )
     expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ syncStatus: 'desktop_verified' }), id: 9 }),
+      expect.objectContaining({
+        data: expect.objectContaining({ syncStatus: 'desktop_verified' }),
+        id: 9,
+      }),
     )
   })
 
@@ -523,7 +532,10 @@ describe('content delivery endpoints', () => {
         }
       }
       if (input.operation === 'getOfficialDeliveryVerificationSummary') {
-        return { data: { release_id: releaseID, stages: [] }, requestId: 'content-delivery-reconcile-4' }
+        return {
+          data: { release_id: releaseID, stages: [] },
+          requestId: 'content-delivery-reconcile-4',
+        }
       }
       throw new Error(`unexpected operation ${input.operation}`)
     })
