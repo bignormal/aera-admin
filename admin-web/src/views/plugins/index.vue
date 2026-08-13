@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { NAlert } from 'naive-ui';
 import type { ResourceCreate, ResourceDelete, ResourceList, ResourceUpdate } from '@/components/platform/resource-crud';
 import { useCapability } from '@/composables/use-capability';
 import { createPlugin, deletePlugin, listPlugins, updatePlugin, type PluginInput } from '@/service/plugins';
@@ -38,6 +39,16 @@ const remove: ResourceDelete = deletePlugin;
       { key: 'version', label: '版本' },
       { key: 'installKind', label: '安装方式', options: installOptions },
       { key: 'riskLevel', label: '风险', options: riskOptions },
+      {
+        key: 'deliveryStatus',
+        label: 'Desktop 交付状态',
+        options: [
+          { label: '已登记', value: 'registered' },
+          { label: '等待 Desktop 插件消费协议', value: 'contract_pending' },
+          { label: 'Cloud 已发布', value: 'cloud_published' },
+          { label: 'Desktop 已验证', value: 'desktop_verified' },
+        ],
+      },
       { key: '_status', label: '状态', kind: 'status' },
       { key: 'enabled', label: '启用', kind: 'boolean' }
     ]"
@@ -60,4 +71,7 @@ const remove: ResourceDelete = deletePlugin;
     :publish="id => publishResource('plugin-catalog', id)"
     :unpublish="id => saveResourceDraft('plugin-catalog', id)"
   />
+  <NAlert type="info" :show-icon="false" class="mt-12px">
+    官方插件当前仅登记在运营后台；在 Cloud/Desktop 签名消费协议完成前，不会显示“可用”或安装入口。
+  </NAlert>
 </template>

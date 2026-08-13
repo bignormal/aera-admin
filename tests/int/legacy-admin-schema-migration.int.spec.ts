@@ -71,11 +71,12 @@ it('bootstraps the complete production schema from the legacy pushed SQLite data
         'admins',
         'audit_logs',
         'cloud_operation_receipts',
+        'content_delivery_links',
         'payload_migrations',
         'runtime_instances',
       ]),
     )
-    expect(tables.rows).toHaveLength(32)
+    expect(tables.rows).toHaveLength(33)
     expect(recorded.rows.map((row) => row.name)).toEqual(
       migrations.map((migration) => migration.name),
     )

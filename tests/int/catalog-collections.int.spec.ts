@@ -35,6 +35,7 @@ describe('catalog metadata collections', () => {
 
     expect(category.active).toBe(true)
     expect(skill.active).toBe(true)
+    expect(skill.distributionClass).toBe('runtime_public')
     expect(skill._status).toBe('draft')
     expect(publishedSkill._status).toBe('published')
   })

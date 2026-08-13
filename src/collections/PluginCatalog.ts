@@ -2,6 +2,7 @@ import type { CollectionConfig, TextFieldValidation } from 'payload'
 
 import { capabilityAccess } from '../access/adminAccess'
 import { createAuditHooks } from '../domain/audit'
+import { enforcePluginDeliveryStatus } from '../domain/content-delivery'
 
 const pluginAuditHooks = createAuditHooks({
   capability: 'content:plugins:write',
@@ -40,6 +41,7 @@ export const PluginCatalog: CollectionConfig = {
   hooks: {
     afterChange: [pluginAuditHooks.afterChange],
     afterDelete: [pluginAuditHooks.afterDelete],
+    beforeValidate: [enforcePluginDeliveryStatus],
   },
   indexes: [{ fields: ['slug', 'version'], unique: true }],
   versions: { drafts: { autosave: false }, maxPerDoc: 20 },
@@ -73,6 +75,20 @@ export const PluginCatalog: CollectionConfig = {
       validate: validateArtifactURL,
     },
     { name: 'checksum', label: 'SHA-256 校验和', type: 'text', required: true },
+    {
+      name: 'deliveryStatus',
+      label: 'Desktop 交付状态',
+      type: 'select',
+      admin: { readOnly: true },
+      defaultValue: 'registered',
+      options: [
+        { label: '已登记', value: 'registered' },
+        { label: '等待 Desktop 插件消费协议', value: 'contract_pending' },
+        { label: 'Cloud 已发布', value: 'cloud_published' },
+        { label: 'Desktop 已验证', value: 'desktop_verified' },
+      ],
+      required: true,
+    },
     {
       name: 'compatibility',
       label: '兼容性',

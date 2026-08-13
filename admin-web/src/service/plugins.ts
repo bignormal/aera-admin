@@ -13,6 +13,7 @@ export interface PluginRecord {
   artifactURL: string;
   checksum: string;
   createdAt: string;
+  deliveryStatus: 'cloud_published' | 'contract_pending' | 'desktop_verified' | 'registered';
   enabled: boolean;
   id: ResourceID;
   installKind: 'pip_entry_point' | 'runtime_bundled' | 'standalone_plugin';
@@ -24,7 +25,7 @@ export interface PluginRecord {
   version: string;
 }
 
-export type PluginInput = Omit<PluginRecord, '_status' | 'createdAt' | 'id' | 'updatedAt'> & {
+export type PluginInput = Omit<PluginRecord, '_status' | 'createdAt' | 'deliveryStatus' | 'id' | 'updatedAt'> & {
   _status?: 'draft' | 'published';
 };
 

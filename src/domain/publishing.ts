@@ -23,7 +23,10 @@ function fingerprint(data: Record<string, unknown>): string {
     name: data.name ?? '',
     rolePrompt: data.rolePrompt ?? '',
     skills: Array.isArray(data.skills)
-      ? data.skills.map(relationID).filter((value) => value !== undefined).sort()
+      ? data.skills
+          .map(relationID)
+          .filter((value) => value !== undefined)
+          .sort()
       : [],
     tags: data.tags ?? [],
     templateKey: data.templateKey ?? '',
@@ -62,6 +65,13 @@ export const validateAgentPublish: CollectionBeforeValidateHook = async ({
       id: skillID,
       overrideAccess: true,
     })
+    if (skill.distributionClass === 'cloud_proprietary') {
+      errors.push({
+        message: '第一版官方 Agent 只能使用 runtime_public 技能。',
+        path: 'skills',
+      })
+      continue
+    }
     if (!skill.active || !skill.runtimeSkillId) {
       errors.push({
         message: '发布前所有技能必须启用并配置 Runtime 技能标识。',
@@ -79,6 +89,29 @@ export const validateAgentPublish: CollectionBeforeValidateHook = async ({
   }
 
   if (errors.length) throw new ValidationError({ errors, req })
+  return data
+}
+
+export const validateSkillDistribution: CollectionBeforeValidateHook = async ({
+  data,
+  originalDoc,
+  req,
+}) => {
+  const next = { ...originalDoc, ...data }
+  const distributionClass = next.distributionClass ?? 'runtime_public'
+  if (distributionClass === 'cloud_proprietary') return data
+  const runtimeSkillId = typeof next.runtimeSkillId === 'string' ? next.runtimeSkillId : ''
+  if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(runtimeSkillId)) {
+    throw new ValidationError({
+      errors: [
+        {
+          message: 'Runtime 公开技能必须配置合法的 Runtime 技能标识。',
+          path: 'runtimeSkillId',
+        },
+      ],
+      req,
+    })
+  }
   return data
 }
 

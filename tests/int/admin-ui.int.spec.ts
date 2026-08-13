@@ -82,6 +82,15 @@ describe('admin UI helpers', () => {
     expect(publishingRoute).toContain("capability: 'official-agents:read'")
   })
 
+  it('keeps publishing on one element root for route transitions', () => {
+    const source = readFileSync(
+      new URL('../../admin-web/src/views/publishing/index.vue', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toMatch(/<template>\s*<div[^>]*>[\s\S]*<ResourcePageShell/)
+  })
+
   it('keeps every user-visible administration surface on the Aera brand', () => {
     const visibleFiles = [
       '../../src/components/admin/AgentEraLogo.tsx',

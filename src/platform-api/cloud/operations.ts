@@ -265,6 +265,13 @@ export const cloudOperations = {
     ({ submission_id }) => `/official-agent-submissions/${submission_id}`,
     submissionID,
   ),
+  getOfficialDeliveryTarget: cloudOperation(
+    'official-read',
+    'GET',
+    officialRead,
+    ({ submission_id }) => `/official-agent-submissions/${submission_id}/delivery-target`,
+    submissionID,
+  ),
   listOfficialVersions: cloudOperation(
     'official-read',
     'GET',
@@ -289,6 +296,13 @@ export const cloudOperations = {
     'GET',
     officialRead,
     ({ release_id }) => `/official-agent-releases/${release_id}`,
+    releaseID,
+  ),
+  getOfficialDeliveryVerificationSummary: cloudOperation(
+    'official-read',
+    'GET',
+    officialRead,
+    ({ release_id }) => `/official-agent-releases/${release_id}/delivery-verifications`,
     releaseID,
   ),
   listOfficialAgentAuditEvents: cloudOperation(

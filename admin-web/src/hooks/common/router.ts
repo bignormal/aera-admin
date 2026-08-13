@@ -2,6 +2,7 @@ import { useRouter } from 'vue-router';
 import type { RouteLocationRaw } from 'vue-router';
 import type { RouteKey } from '@elegant-router/types';
 import { router as globalRouter } from '@/router';
+import { loginRedirectFor } from './login-redirect';
 
 /**
  * Router push
@@ -68,7 +69,7 @@ export function useRouterPush(inSetup = true) {
       }
     };
 
-    const redirect = redirectUrl || route.value.fullPath;
+    const redirect = loginRedirectFor(route.value, redirectUrl);
 
     options.query = {
       redirect

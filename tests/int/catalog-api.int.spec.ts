@@ -1,35 +1,38 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { buildCatalog } from '../../src/domain/catalog'
+import { buildCatalog, type CatalogAgentDocument } from '../../src/domain/catalog'
 import { catalogEndpoint } from '../../src/endpoints/catalog'
 
 const publishedDoc = {
   avatar: { url: '/media/avatar.png' },
-  category: { active: true, key: 'product', name: '产品', sortOrder: 1 },
+  category: { active: true, key: 'product', name: '产品' },
   introduction: '负责产品规划。',
   name: '产品经理',
   releaseVersion: 1,
   rolePrompt: '你是一名产品经理。',
   skills: [
-    { active: true, key: 'documents', runtimeSkillId: 'document-analysis' },
+    {
+      active: true,
+      distributionClass: 'runtime_public',
+      key: 'documents',
+      runtimeSkillId: 'document-analysis',
+    },
+    {
+      active: true,
+      distributionClass: 'cloud_proprietary',
+      key: 'private-search',
+      runtimeSkillId: 'private-search',
+    },
     { active: false, key: 'disabled-skill', runtimeSkillId: 'disabled-skill' },
   ],
   tags: [{ value: '产品规划' }],
   templateKey: 'product-manager',
-}
+} satisfies CatalogAgentDocument
 
 describe('published catalog', () => {
   it('builds a deterministic sanitized response', () => {
-    const first = buildCatalog(
-      [publishedDoc],
-      'http://localhost:3000',
-      '2026-07-15T00:00:00.000Z',
-    )
-    const second = buildCatalog(
-      [publishedDoc],
-      'http://localhost:3000',
-      '2026-07-15T00:01:00.000Z',
-    )
+    const first = buildCatalog([publishedDoc], 'http://localhost:3000', '2026-07-15T00:00:00.000Z')
+    const second = buildCatalog([publishedDoc], 'http://localhost:3000', '2026-07-15T00:01:00.000Z')
 
     expect(first.catalogVersion).toBe(second.catalogVersion)
     expect(first.experts[0]).not.toHaveProperty('id')
